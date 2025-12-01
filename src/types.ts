@@ -41,3 +41,9 @@ export interface TranslationResponse {
   partOfSpeech: string;
   usageHint: string;
 }
+
+export interface WordSuggestion {
+  word: string;
+  type: string; // noun, verb, adj...
+  meaning: string; // short meaning
+}
