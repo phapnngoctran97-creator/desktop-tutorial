@@ -345,10 +345,12 @@ const App: React.FC = () => {
     // Determine strategy
     const isMale = ['Fenrir', 'Puck', 'Charon'].includes(selectedVoice);
 
-    // STRATEGY 1: NATIVE TTS for short text (Fastest)
-    if (!forceGemini && text.length < 150) {
+    // Helper for Native TTS (Ultimate Fallback)
+    const playNativeTTS = (textToSpeak: string) => {
         try {
-            const utterance = new SpeechSynthesisUtterance(text);
+            // Clean text for native TTS
+            const cleanText = textToSpeak.replace(/<\/?[^>]+(>|$)/g, "").replace(/\*\*/g, "");
+            const utterance = new SpeechSynthesisUtterance(cleanText);
             utterance.lang = 'en-US';
             utterance.rate = Math.max(0.8, Math.min(playbackSpeed, 1.2)); 
             utterance.volume = 1;
@@ -371,9 +373,15 @@ const App: React.FC = () => {
             setIsLoadingAudio(false); 
             window.speechSynthesis.speak(utterance);
         } catch (e) {
-            console.warn("Native TTS failed, falling back to Gemini");
-            // Fallthrough to Gemini
+            console.error("Native TTS also failed", e);
+            alert("Thiết bị của bạn không hỗ trợ phát âm thanh.");
+            stopAllAudio();
         }
+    };
+
+    // STRATEGY 1: NATIVE TTS for short text (Fastest)
+    if (!forceGemini && text.length < 150) {
+        playNativeTTS(text);
         return;
     }
 
@@ -381,7 +389,9 @@ const App: React.FC = () => {
     try {
         // Pass isDialogue flag to service
         const base64Audio = await generateSpeech(text, selectedVoice, isDialogue);
-        if (!base64Audio) throw new Error("Audio generation failed");
+        
+        // If Gemini fails (returns undefined), throw error to trigger catch block
+        if (!base64Audio) throw new Error("Gemini Audio generation returned empty");
 
         // Convert Base64 to Uint8Array
         const binaryString = atob(base64Audio);
@@ -414,7 +424,7 @@ const App: React.FC = () => {
               rafRef.current = requestAnimationFrame(trackProgress);
             }
           } else if (isPaused) {
-             // If paused, keep loop alive but don't update progress logic same way or just stop
+             // If paused, keep loop alive
              rafRef.current = requestAnimationFrame(trackProgress);
           }
         };
@@ -431,9 +441,9 @@ const App: React.FC = () => {
         setIsLoadingAudio(false);
 
     } catch (error) {
-        console.error("Audio playback failed", error);
-        stopAllAudio();
-        alert("Không thể phát âm thanh. Vui lòng kiểm tra kết nối mạng.");
+        console.warn("Gemini Audio failed, switching to Native TTS fallback", error);
+        // ULTIMATE FALLBACK: Use Browser Native TTS if Gemini fails
+        playNativeTTS(text);
     }
   };
 
@@ -986,47 +996,35 @@ const App: React.FC = () => {
       {selectedWord && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pointer-events-none p-4">
           <div 
-            className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6 pointer-events-auto transform transition-all animate-bounce-in border border-indigo-100"
-            style={{ marginBottom: 'env(safe-area-inset-bottom)' }}
+            className="bg-white w-full max-w-md rounded-2xl shadow-xl border border-gray-100 p-6 pointer-events-auto mb-4 sm:mb-0"
           >
-            <div className="flex justify-between items-start mb-2">
+            <div className="flex justify-between items-start mb-3">
               <div>
-                <h3 className="text-2xl font-bold text-indigo-900 capitalize flex items-center gap-2">
+                <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                   {selectedWord.word}
-                  {selectedWord.phonetic && <span className="text-sm font-normal text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded">{selectedWord.phonetic}</span>}
-                  <button 
-                    onClick={() => handleAudioToggle('modal_word', selectedWord.word)}
-                    disabled={isLoadingAudio && activeAudioId === 'modal_word'}
-                    className="p-1 text-indigo-500 hover:text-indigo-700"
-                  >
-                     {activeAudioId === 'modal_word' && !isPaused ? <PauseIcon className="w-4 h-4" /> : <SpeakerWaveIcon className="w-4 h-4" />}
-                  </button>
+                  <span className="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-mono">
+                    {selectedWord.phonetic}
+                  </span>
                 </h3>
-                <span className="text-xs font-semibold text-indigo-500 uppercase tracking-wide">{selectedWord.type}</span>
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide mt-1">{selectedWord.type}</p>
               </div>
-              <button onClick={() => setSelectedWord(null)} className="text-gray-400 hover:text-gray-600 bg-gray-100 rounded-full p-1">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              <button 
+                onClick={() => setSelectedWord(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <XMarkIcon className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="space-y-3 mt-4">
-              <div>
-                <p className="text-gray-800 font-medium text-lg leading-snug">
-                  {selectedWord.meaning}
-                </p>
-              </div>
+            <div className="space-y-3">
+              <p className="text-gray-700 text-base">{selectedWord.meaning}</p>
               {selectedWord.example && (
-                <div className="bg-indigo-50 p-3 rounded-lg border-l-4 border-indigo-400">
-                  <p className="text-sm text-indigo-800 italic">"{selectedWord.example}"</p>
+                <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm text-gray-600 italic">
+                  "{selectedWord.example}"
                 </div>
               )}
             </div>
           </div>
-          {/* Overlay to close on click outside */}
-          <div 
-            className="absolute inset-0 bg-black/20 -z-10 pointer-events-auto"
-            onClick={() => setSelectedWord(null)}
-          ></div>
         </div>
       )}
     </div>

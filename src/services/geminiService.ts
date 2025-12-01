@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
+import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { TranslationResponse, GeneratedStory, GrammarPoint } from "../types";
 
 const getAIClient = () => {
@@ -197,6 +197,14 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
     .replace(/#/g, "")              // Remove hashes
     .trim();
 
+  // Safety settings to prevent blocking of mild content (stories/dialogues)
+  const safetySettings = [
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  ];
+
   // ATTEMPT 1: Multi-speaker (if applicable)
   if (isDialogue) {
     try {
@@ -219,6 +227,7 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
           contents: [{ parts: [{ text: cleanText }] }],
           config: {
             responseModalities: [Modality.AUDIO],
+            safetySettings: safetySettings,
             speechConfig: {
               multiSpeakerVoiceConfig: {
                 speakerVoiceConfigs: [
@@ -245,7 +254,7 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
     }
   }
 
-  // ATTEMPT 2: Fallback to Single Speaker (Guaranteed to work)
+  // ATTEMPT 2: Fallback to Single Speaker (Guaranteed to work if API is up)
   try {
     console.log("Using Single-speaker TTS Fallback");
     const response = await ai.models.generateContent({
@@ -253,6 +262,7 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
       contents: [{ parts: [{ text: cleanText }] }],
       config: {
         responseModalities: [Modality.AUDIO],
+        safetySettings: safetySettings, // Apply safety settings here too
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: { voiceName: voice },
