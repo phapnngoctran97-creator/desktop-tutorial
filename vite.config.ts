@@ -7,9 +7,11 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      // Polyfill process.env for the application code
+      // Inject the specific API KEY
       'process.env.API_KEY': JSON.stringify(env.API_KEY),
-      'process.env': process.env
+      // Polyfill process.env as an empty object to prevent "process is not defined" crashes
+      // in third-party libraries, but DO NOT pass the actual process.env object
+      'process.env': {} 
     },
     build: {
       outDir: 'dist',
