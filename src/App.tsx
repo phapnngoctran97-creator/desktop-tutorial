@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse } from './src/types';
-import { translateText, generateStoryFromWords, lookupWord } from './src/services/geminiService';
+import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse } from './types';
+import { translateText, generateStoryFromWords, lookupWord } from './services/geminiService';
 import { 
   BookOpenIcon, 
   LanguageIcon, 
