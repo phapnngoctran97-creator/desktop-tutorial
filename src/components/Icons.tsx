@@ -59,3 +59,9 @@ export const AcademicCapIcon = ({ className }: { className?: string }) => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.499 5.221 69.17 69.17 0 00-2.66.812M12 14.95a3.15 3.15 0 00-3.15-3.15h-3c-.132 0-.259.038-.371.106a3.152 3.152 0 00-1.467 2.102 3.15 3.15 0 00.748 3.14l1.344 1.344a3.15 3.15 0 003.882.49 3.15 3.15 0 001.014-4.032z" />
   </svg>
 );
+
+export const ArrowsRightLeftIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+  </svg>
+);

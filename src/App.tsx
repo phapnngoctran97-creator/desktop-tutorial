@@ -12,7 +12,8 @@ import {
   SpeakerWaveIcon,
   PauseIcon,
   XMarkIcon,
-  AcademicCapIcon
+  AcademicCapIcon,
+  ArrowsRightLeftIcon
 } from './components/Icons';
 
 // Constants
@@ -42,6 +43,7 @@ const App: React.FC = () => {
   // State
   const [inputText, setInputText] = useState('');
   const [translatedResult, setTranslatedResult] = useState<TranslationResponse | null>(null);
+  const [direction, setDirection] = useState<'vi_en' | 'en_vi'>('vi_en');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [stories, setStories] = useState<GeneratedStory[]>([]);
   const [lastGenTime, setLastGenTime] = useState<number>(0);
@@ -135,33 +137,57 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEY_LAST_GEN, lastGenTime.toString());
   }, [lastGenTime]);
 
+  const handleToggleDirection = () => {
+    setDirection(prev => prev === 'vi_en' ? 'en_vi' : 'vi_en');
+    setTranslatedResult(null);
+    setInputText('');
+  };
+
   const handleTranslate = useCallback(async () => {
     if (!inputText.trim()) return;
 
     setIsLoadingTranslate(true);
     try {
-      const result = await translateText(inputText);
+      const result = await translateText(inputText, direction);
       setTranslatedResult(result);
 
-      // Add to history if unique (based on source text)
-      const newItem: HistoryItem = {
-        id: Date.now().toString(),
-        vietnamese: inputText.trim(),
-        english: result.english.trim(),
-        partOfSpeech: result.partOfSpeech,
-        usageHint: result.usageHint,
-        timestamp: Date.now(),
-        usedInStory: false,
-      };
+      // Map data based on direction:
+      // If VI -> EN: input is Vietnamese, result.english is English
+      // If EN -> VI: input is English, result.english is Vietnamese (because of how we reused the key for "result")
+      
+      let englishText = "";
+      let vietnameseText = "";
 
-      setHistory(prev => [newItem, ...prev]);
+      if (direction === 'vi_en') {
+        englishText = result.english.trim();
+        vietnameseText = inputText.trim();
+      } else {
+        englishText = inputText.trim();
+        vietnameseText = result.english.trim();
+      }
+
+      // Add to history if unique
+      // We only want to save if we have a valid English word (to use in Story generation)
+      if (englishText) {
+          const newItem: HistoryItem = {
+            id: Date.now().toString(),
+            vietnamese: vietnameseText,
+            english: englishText,
+            partOfSpeech: result.partOfSpeech,
+            usageHint: result.usageHint,
+            timestamp: Date.now(),
+            usedInStory: false,
+          };
+          setHistory(prev => [newItem, ...prev]);
+      }
+
     } catch (error) {
       console.error("Translation failed", error);
       alert("Có lỗi xảy ra khi dịch. Vui lòng thử lại.");
     } finally {
       setIsLoadingTranslate(false);
     }
-  }, [inputText]);
+  }, [inputText, direction]);
 
   const handleGenerateStory = useCallback(async (force: boolean = false) => {
     const recentWords = history.filter(item => item.timestamp > lastGenTime);
@@ -615,16 +641,37 @@ const App: React.FC = () => {
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         
         {/* Translation Section */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
+          
+          {/* Swap Button (Absolute centered on desktop, between on mobile) */}
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 hidden md:block">
+            <button 
+              onClick={handleToggleDirection}
+              className="bg-white p-2 rounded-full shadow-lg border border-gray-100 text-indigo-600 hover:bg-indigo-50 transition-colors"
+              title="Đảo chiều dịch"
+            >
+              <ArrowsRightLeftIcon className="w-5 h-5" />
+            </button>
+          </div>
+
           {/* Input */}
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col h-full">
-            <label className="text-sm font-semibold text-gray-500 mb-2 flex items-center gap-2">
-              <LanguageIcon className="w-4 h-4" />
-              Tiếng Việt
-            </label>
+            <div className="flex justify-between items-center mb-2">
+                <label className="text-sm font-semibold text-gray-500 flex items-center gap-2">
+                    <LanguageIcon className="w-4 h-4" />
+                    {direction === 'vi_en' ? 'Tiếng Việt' : 'Tiếng Anh'}
+                </label>
+                {/* Mobile Swap Button */}
+                <button 
+                  onClick={handleToggleDirection}
+                  className="md:hidden bg-gray-100 p-1.5 rounded-full text-indigo-600"
+                >
+                    <ArrowsRightLeftIcon className="w-4 h-4" />
+                </button>
+            </div>
             <textarea
               className="w-full flex-grow p-4 bg-gray-50 rounded-xl border-transparent focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-all resize-none text-lg outline-none"
-              placeholder="Nhập từ hoặc câu cần dịch..."
+              placeholder={direction === 'vi_en' ? "Nhập tiếng Việt..." : "Enter English text..."}
               rows={5}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
@@ -650,7 +697,7 @@ const App: React.FC = () => {
                     Đang dịch...
                   </>
                 ) : (
-                  'Dịch sang Tiếng Anh'
+                  direction === 'vi_en' ? 'Dịch sang Anh' : 'Dịch sang Việt'
                 )}
               </button>
             </div>
@@ -660,7 +707,7 @@ const App: React.FC = () => {
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col h-full relative overflow-hidden">
             <label className="text-sm font-semibold text-gray-500 mb-2 flex items-center gap-2">
               <SparklesIcon className="w-4 h-4 text-indigo-500" />
-              Tiếng Anh
+              {direction === 'vi_en' ? 'Tiếng Anh' : 'Tiếng Việt'}
             </label>
             <div className="flex-grow flex items-center justify-center p-4 bg-indigo-50 rounded-xl border border-indigo-100 min-h-[140px]">
               {translatedResult ? (
@@ -670,11 +717,20 @@ const App: React.FC = () => {
                       <p className="text-xl md:text-3xl font-bold text-indigo-900 break-words">
                         {translatedResult.english}
                       </p>
+                      
+                      {/* Audio Button - Only show if the result is English OR if input was English (we want to hear English) */}
+                      {/* Actually, if direction is vi_en, result is English. If en_vi, input is English. */}
+                      {/* Let's simplify: Play audio for the English text involved. */}
                       <button 
-                        onClick={() => handleAudioToggle('translate_res', translatedResult.english)}
+                        onClick={() => {
+                            // If direction is vi_en, we play the Result (English)
+                            // If direction is en_vi, we play the Input (English)
+                            const textToRead = direction === 'vi_en' ? translatedResult.english : inputText;
+                            handleAudioToggle('translate_res', textToRead);
+                        }}
                         disabled={isLoadingAudio && activeAudioId === 'translate_res'}
                         className={`p-2 rounded-full transition-all shadow-sm ${activeAudioId === 'translate_res' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-100'}`}
-                        title={activeAudioId === 'translate_res' && !isPaused ? "Tạm dừng" : "Nghe phát âm"}
+                        title={activeAudioId === 'translate_res' && !isPaused ? "Tạm dừng" : "Nghe tiếng Anh"}
                       >
                          {activeAudioId === 'translate_res' && !isPaused ? (
                            <PauseIcon className="w-5 h-5" />

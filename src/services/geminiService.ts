@@ -9,18 +9,44 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
-export const translateText = async (text: string): Promise<TranslationResponse> => {
+export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' = 'vi_en'): Promise<TranslationResponse> => {
   try {
     const ai = getAIClient();
-    const prompt = `Translate the following Vietnamese text to English. 
     
-    Vietnamese: "${text}"
+    let promptInstructions = "";
     
-    Return a JSON object with:
-    1. "english": The English translation.
-    2. "phonetic": The IPA (International Phonetic Alphabet) transcription of the English translation.
-    3. "partOfSpeech": The grammatical category (e.g., Noun, Verb, Adjective, Phrase, Sentence).
-    4. "usageHint": A brief tip, collocation, or very short example of how to use it naturally.
+    if (direction === 'vi_en') {
+      promptInstructions = `
+        Translate the following Vietnamese text to English.
+        Vietnamese: "${text}"
+        
+        Return JSON with:
+        1. "english": The English translation.
+        2. "phonetic": The IPA transcription of the English translation.
+      `;
+    } else {
+      promptInstructions = `
+        Translate the following English text to Vietnamese.
+        English: "${text}"
+        
+        Return JSON with:
+        1. "english": The Vietnamese translation (Put the Vietnamese result here).
+        2. "phonetic": The IPA transcription of the INPUT English text (Important: We need the pronunciation of the source English word).
+      `;
+    }
+
+    const prompt = `
+      ${promptInstructions}
+      3. "partOfSpeech": The grammatical category (e.g., Noun, Verb).
+      4. "usageHint": A brief tip, collocation, or very short example of how to use the English word/phrase naturally.
+      
+      Response JSON Schema:
+      {
+        "english": "The translated result string",
+        "phonetic": "IPA string",
+        "partOfSpeech": "string",
+        "usageHint": "string"
+      }
     `;
 
     const response = await ai.models.generateContent({
