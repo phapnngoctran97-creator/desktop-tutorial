@@ -374,50 +374,33 @@ const App: React.FC = () => {
     setHighlightedWordIndex(-1);
     lastAudioVoiceRef.current = selectedVoice; // Record the voice used
 
-    // Initialize/Resume Audio Context (Required for mobile)
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContextClass();
-    }
-    
-    // Always ensure context is running before starting new playback
-    if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-    }
-
-    // Determine strategy
-    const isMale = ['Fenrir', 'Puck', 'Charon'].includes(selectedVoice);
-
-    // Helper for Native TTS (Ultimate Fallback)
+    // HELPER: Native TTS
     const playNativeTTS = (textToSpeak: string) => {
         try {
-            // Clean text for native TTS
-            // Remove tags and markdown for reading, but keep content
+            // Clean text
             const cleanText = textToSpeak
-                .replace(/<\/?[^>]+(>|$)/g, " ") // Replace tags with space
+                .replace(/<\/?[^>]+(>|$)/g, " ")
                 .replace(/\*\*/g, "")
                 .replace(/\s+/g, " ")
                 .trim();
 
             const utterance = new SpeechSynthesisUtterance(cleanText);
             utterance.lang = 'en-US';
-            utterance.rate = Math.max(0.7, Math.min(playbackSpeed, 1.3)); // Native TTS speed limits
+            utterance.rate = Math.max(0.7, Math.min(playbackSpeed, 1.3));
             utterance.volume = 1;
             
             const voices = window.speechSynthesis.getVoices();
-            // Try to find a matching gender voice if possible
+            const isMale = ['Fenrir', 'Puck', 'Charon'].includes(selectedVoice);
             const preferredVoice = voices.find(v => {
               const name = v.name.toLowerCase();
               const lang = v.lang;
               if (!lang.startsWith('en')) return false;
-              
-              if (isMale) return name.includes('male') || name.includes('david') || name.includes('james');
+              if (isMale) return name.includes('male') || name.includes('david');
               return name.includes('female') || name.includes('zira') || name.includes('google us english');
             });
 
             if (preferredVoice) utterance.voice = preferredVoice;
             
-            // Events for state management
             utterance.onend = () => { 
                 setActiveAudioId(null); 
                 setIsLoadingAudio(false); 
@@ -430,32 +413,29 @@ const App: React.FC = () => {
                 setIsLoadingAudio(false); 
                 setAudioProgress(0);
             };
-
-            // Karaoke for Native TTS using onboundary
-            // 'word' boundary gives us the char index
+            
+            // Karaoke support for Native TTS
             utterance.onboundary = (event) => {
                 if (event.name === 'word') {
-                    // Approximate mapping: Count spaces before this char index
                     const textBefore = cleanText.substring(0, event.charIndex);
                     const wordCount = textBefore.trim().split(/\s+/).length;
                     setHighlightedWordIndex(wordCount);
-                    // Also update general progress for slider if we had one
-                    const estimatedProgress = event.charIndex / cleanText.length;
-                    setAudioProgress(estimatedProgress);
+                    setAudioProgress(event.charIndex / cleanText.length);
                 }
             };
             
             setIsLoadingAudio(false); 
             window.speechSynthesis.speak(utterance);
         } catch (e) {
-            console.error("Native TTS also failed", e);
-            alert("Thiết bị của bạn không hỗ trợ phát âm thanh.");
+            console.error("Native TTS failed", e);
             stopAllAudio();
+            alert("Thiết bị không hỗ trợ phát âm thanh.");
         }
     };
 
     // STRATEGY 1: NATIVE TTS for short text (Fastest)
-    // OR if Gemini was not forced
+    // CRITICAL for Mobile: Execute immediately to satisfy iOS autoplay policy
+    // We do NOT initialize AudioContext here because it creates an async gap
     if (!forceGemini && text.length < 150) {
         playNativeTTS(text);
         return;
@@ -463,11 +443,22 @@ const App: React.FC = () => {
 
     // STRATEGY 2: GEMINI AI
     try {
+        // Initialize Audio Context ONLY when needed for Gemini
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!audioContextRef.current) {
+            audioContextRef.current = new AudioContextClass();
+        }
+        
+        // This await is fine here because we are committed to Gemini path (which won't work on iOS silent switch anyway without touch, but standard user interaction allows this)
+        if (audioContextRef.current.state === 'suspended') {
+            await audioContextRef.current.resume();
+        }
+
         // Pass isDialogue flag to service
         const base64Audio = await generateSpeech(text, selectedVoice, isDialogue);
         
         // If Gemini fails (returns undefined), throw error to trigger catch block
-        if (!base64Audio) throw new Error("Gemini Audio generation returned empty (likely rate limit or safety)");
+        if (!base64Audio) throw new Error("Gemini Audio returned empty");
 
         // Convert Base64 to Uint8Array
         const binaryString = atob(base64Audio);
@@ -491,7 +482,6 @@ const App: React.FC = () => {
         audioDurationRef.current = audioBuffer.duration / playbackSpeed;
 
         // Progress Tracking Loop for Visual Karaoke (Gemini)
-        // Since Gemini sends raw audio without timestamps, we use linear interpolation
         const trackProgress = () => {
           if (!audioContextRef.current) return;
 
@@ -530,7 +520,8 @@ const App: React.FC = () => {
     } catch (error) {
         console.warn("Gemini Audio failed, switching to Native TTS fallback", error);
         // ULTIMATE FALLBACK: Use Browser Native TTS if Gemini fails
-        // This ensures the user ALWAYS hears something, treating it as "normal text"
+        // Note: On some strict mobile browsers, this fallback might still be blocked 
+        // because it happens after an async await. But it's the best we can do for fallback.
         playNativeTTS(text);
     }
   };
