@@ -1,0 +1,5 @@
+{
+  "name": "VocaStory AI",
+  "description": "A smart Vietnamese-English translation tool that builds vocabulary lists and generates contextual stories every 10 hours to aid language retention.",
+  "requestFramePermissions": []
+}
