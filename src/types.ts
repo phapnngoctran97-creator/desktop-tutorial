@@ -28,6 +28,7 @@ export interface WordDefinition {
 
 export interface TranslationResponse {
   english: string;
+  phonetic: string; // IPA transcription
   partOfSpeech: string;
   usageHint: string;
 }

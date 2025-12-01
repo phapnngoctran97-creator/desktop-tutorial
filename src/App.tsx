@@ -1,14 +1,16 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse } from './types';
-import { translateText, generateStoryFromWords, lookupWord } from './services/geminiService';
+import { translateText, generateStoryFromWords, lookupWord, generateSpeech } from './services/geminiService';
 import { 
   BookOpenIcon, 
   LanguageIcon, 
   ClockIcon, 
   SparklesIcon, 
   TrashIcon, 
-  ArrowPathIcon 
+  ArrowPathIcon,
+  SpeakerWaveIcon,
+  XMarkIcon
 } from './components/Icons';
 
 // Constants
@@ -32,6 +34,7 @@ const App: React.FC = () => {
   const [showVietnamese, setShowVietnamese] = useState<Record<string, boolean>>({});
   const [selectedWord, setSelectedWord] = useState<WordDefinition | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   
   // Derived State
   const timeSinceLastGen = Date.now() - lastGenTime;
@@ -170,6 +173,12 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteWord = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent event bubbling
+    // Removed window.confirm for instant deletion as requested
+    setHistory(prev => prev.filter(item => item.id !== id));
+  };
+
   const handleWordClick = async (word: string, context: string, event: React.MouseEvent) => {
     // Clean the word (remove punctuation)
     const cleanWord = word.replace(/[.,!?;:()"]/g, '');
@@ -193,19 +202,72 @@ const App: React.FC = () => {
     setShowVietnamese(prev => ({ ...prev, [storyId]: !prev[storyId] }));
   };
 
+  // Helper to decode Raw PCM Data from Gemini
+  const decodePCMData = (audioData: Uint8Array, audioContext: AudioContext) => {
+    // Convert Uint8Array to Int16Array (PCM 16-bit)
+    const pcm16 = new Int16Array(audioData.buffer);
+    const frameCount = pcm16.length;
+    // Create an audio buffer (1 channel, sample rate 24000)
+    const audioBuffer = audioContext.createBuffer(1, frameCount, 24000);
+    const channelData = audioBuffer.getChannelData(0);
+    
+    for (let i = 0; i < frameCount; i++) {
+      // Normalize to float [-1.0, 1.0]
+      channelData[i] = pcm16[i] / 32768.0;
+    }
+    return audioBuffer;
+  };
+
+  // Audio Playback Helper
+  const playAudio = async (text: string) => {
+    if (isPlayingAudio) return;
+    setIsPlayingAudio(true);
+
+    try {
+      const base64Audio = await generateSpeech(text);
+      if (!base64Audio) throw new Error("Audio generation failed");
+
+      // Initialize Audio Context
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
+
+      // Convert Base64 to Uint8Array
+      const binaryString = atob(base64Audio);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Decode PCM Data Manually
+      const audioBuffer = decodePCMData(bytes, outputAudioContext);
+      
+      const source = outputAudioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(outputAudioContext.destination);
+      
+      source.onended = () => {
+        setIsPlayingAudio(false);
+        outputAudioContext.close();
+      };
+      
+      source.start();
+
+    } catch (error) {
+      console.error("Audio playback failed", error);
+      setIsPlayingAudio(false);
+      alert("Không thể phát âm thanh lúc này (Lỗi kết nối hoặc định dạng).");
+    }
+  };
+
   // Helper component to render clickable text
   const InteractiveStoryText = ({ content }: { content: string }) => {
-    // Regex to split by bold tags, then split remaining text by spaces to make words clickable
-    // HTML structure from Gemini: "Some text <b>word</b> some text."
-    
-    // 1. Split by HTML tags first to preserve Bold words
     const parts = content.split(/(<b>.*?<\/b>)/g);
 
     return (
       <div className="leading-relaxed">
         {parts.map((part, index) => {
           if (part.startsWith('<b>') && part.endsWith('</b>')) {
-            // It's a key vocabulary word
             const innerText = part.replace(/<\/?b>/g, '');
             return (
               <span 
@@ -217,11 +279,10 @@ const App: React.FC = () => {
               </span>
             );
           } else {
-            // Normal text, split by space to make words clickable
             return (
               <span key={index}>
                 {part.split(/(\s+)/).map((word, wIndex) => {
-                  if (word.trim().length === 0) return word; // Return spaces as is
+                  if (word.trim().length === 0) return word;
                   return (
                     <span 
                       key={`${index}-${wIndex}`}
@@ -315,9 +376,22 @@ const App: React.FC = () => {
               {translatedResult ? (
                 <div className="w-full text-center animate-fade-in flex flex-col items-center">
                   <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-3 mb-3">
-                    <p className="text-xl md:text-3xl font-bold text-indigo-900 break-words">
+                    <p className="text-xl md:text-3xl font-bold text-indigo-900 break-words flex items-center gap-2">
                       {translatedResult.english}
+                      <button 
+                        onClick={() => playAudio(translatedResult.english)}
+                        disabled={isPlayingAudio}
+                        className={`p-2 rounded-full transition-colors ${isPlayingAudio ? 'text-gray-400 bg-gray-100' : 'text-indigo-500 hover:bg-indigo-100'}`}
+                        title="Nghe phát âm"
+                      >
+                         <SpeakerWaveIcon className={`w-5 h-5 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+                      </button>
                     </p>
+                    {translatedResult.phonetic && (
+                      <span className="text-sm font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                        {translatedResult.phonetic}
+                      </span>
+                    )}
                     {translatedResult.partOfSpeech && (
                       <span className="text-xs font-semibold uppercase tracking-wide bg-indigo-200 text-indigo-800 px-2 py-1 rounded-md">
                         {translatedResult.partOfSpeech}
@@ -358,7 +432,14 @@ const App: React.FC = () => {
                   </h3>
                   <div className="flex flex-wrap gap-3">
                     {group.items.map((item) => (
-                      <div key={item.id} className="group flex flex-col bg-gray-50 hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 px-4 py-2 rounded-xl transition-all min-w-[140px] max-w-[240px]">
+                      <div key={item.id} className="group relative flex flex-col bg-gray-50 hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 px-4 py-2 rounded-xl transition-all min-w-[140px] max-w-[240px]">
+                        <button 
+                          onClick={(e) => handleDeleteWord(item.id, e)}
+                          className="absolute -top-1.5 -right-1.5 p-1 rounded-full bg-red-100 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm border border-red-200 hover:bg-red-200 z-10"
+                          title="Xóa từ này"
+                        >
+                          <XMarkIcon className="w-3 h-3" />
+                        </button>
                         <div className="flex justify-between items-start mb-1">
                           <span className="font-semibold text-indigo-700 truncate mr-2">{item.english}</span>
                           {item.partOfSpeech && (
@@ -451,6 +532,14 @@ const App: React.FC = () => {
                         </span>
                         <div className="flex items-center gap-3">
                           <button 
+                            onClick={() => playAudio(story.content)}
+                            disabled={isPlayingAudio}
+                            className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${isPlayingAudio ? 'bg-white/20 text-gray-300' : 'bg-white/10 hover:bg-white/20 text-indigo-100'}`}
+                          >
+                            <SpeakerWaveIcon className={`w-3 h-3 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+                            {isPlayingAudio ? 'Đang đọc...' : 'Nghe truyện'}
+                          </button>
+                          <button 
                             onClick={() => toggleVietnamese(story.id)}
                             className="text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-indigo-100 transition-colors flex items-center gap-1"
                           >
@@ -517,6 +606,13 @@ const App: React.FC = () => {
                 <h3 className="text-2xl font-bold text-indigo-900 capitalize flex items-center gap-2">
                   {selectedWord.word}
                   {selectedWord.phonetic && <span className="text-sm font-normal text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded">{selectedWord.phonetic}</span>}
+                  <button 
+                    onClick={() => playAudio(selectedWord.word)}
+                    disabled={isPlayingAudio}
+                    className="p-1 text-indigo-500 hover:text-indigo-700"
+                  >
+                    <SpeakerWaveIcon className={`w-4 h-4 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+                  </button>
                 </h3>
                 <span className="text-xs font-semibold text-indigo-500 uppercase tracking-wide">{selectedWord.type}</span>
               </div>

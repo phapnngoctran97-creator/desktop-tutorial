@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { TranslationResponse } from "../types";
 
 const getAIClient = () => {
@@ -18,8 +18,9 @@ export const translateText = async (text: string): Promise<TranslationResponse> 
     
     Return a JSON object with:
     1. "english": The English translation.
-    2. "partOfSpeech": The grammatical category (e.g., Noun, Verb, Adjective, Phrase, Sentence).
-    3. "usageHint": A brief tip, collocation, or very short example of how to use it naturally.
+    2. "phonetic": The IPA (International Phonetic Alphabet) transcription of the English translation.
+    3. "partOfSpeech": The grammatical category (e.g., Noun, Verb, Adjective, Phrase, Sentence).
+    4. "usageHint": A brief tip, collocation, or very short example of how to use it naturally.
     `;
 
     const response = await ai.models.generateContent({
@@ -31,6 +32,7 @@ export const translateText = async (text: string): Promise<TranslationResponse> 
           type: Type.OBJECT,
           properties: {
             english: { type: Type.STRING },
+            phonetic: { type: Type.STRING },
             partOfSpeech: { type: Type.STRING },
             usageHint: { type: Type.STRING },
           },
@@ -47,6 +49,7 @@ export const translateText = async (text: string): Promise<TranslationResponse> 
     // Fallback in case of error
     return { 
       english: "Error translating", 
+      phonetic: "",
       partOfSpeech: "Unknown", 
       usageHint: "Please try again." 
     };
@@ -140,5 +143,30 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
   } catch (error) {
     console.error("Lookup Error", error);
     return { phonetic: "", type: "", meaning: "Không thể tra cứu", example: "" };
+  }
+};
+
+export const generateSpeech = async (text: string): Promise<string | undefined> => {
+  try {
+    const ai = getAIClient();
+    const cleanText = text.replace(/<\/?[^>]+(>|$)/g, ""); // Remove HTML tags like <b>
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: cleanText }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
+          },
+        },
+      },
+    });
+
+    return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  } catch (error) {
+    console.error("TTS Error:", error);
+    return undefined;
   }
 };
