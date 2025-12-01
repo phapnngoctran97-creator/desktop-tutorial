@@ -9,6 +9,13 @@ export interface HistoryItem {
   usedInStory: boolean;
 }
 
+export interface GrammarPoint {
+  structure: string; // Tên cấu trúc (e.g., Past Perfect)
+  explanation: string; // Giải thích ngắn gọn
+  exampleInStory: string; // Câu ví dụ trích từ truyện
+  memoryTip: string; // Mẹo ghi nhớ
+}
+
 export interface GeneratedStory {
   id: string;
   content: string; // HTML string with bold tags for vocab (English)
@@ -16,6 +23,7 @@ export interface GeneratedStory {
   timestamp: number;
   vocabularyUsed: string[];
   theme: string;
+  grammarPoints?: GrammarPoint[]; // Optional for backward compatibility
 }
 
 export interface WordDefinition {

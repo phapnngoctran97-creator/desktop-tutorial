@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { TranslationResponse } from "../types";
+import { TranslationResponse, GeneratedStory, GrammarPoint } from "../types";
 
 const getAIClient = () => {
   if (!process.env.API_KEY) {
@@ -56,28 +56,49 @@ export const translateText = async (text: string): Promise<TranslationResponse> 
   }
 };
 
-export const generateStoryFromWords = async (words: string[], theme: string = ''): Promise<{ english: string, vietnamese: string }> => {
+export const generateStoryFromWords = async (words: string[], theme: string = '', type: 'story' | 'dialogue' = 'story'): Promise<{ english: string, vietnamese: string, grammarPoints: GrammarPoint[] }> => {
   try {
     const ai = getAIClient();
     const wordListStr = words.join(', ');
-    const themeStr = theme ? `The story must have the following theme/genre: "${theme}".` : '';
+    const themeStr = theme ? `The content must revolve around the theme: "${theme}".` : '';
+    
+    let typeInstruction = "";
+    if (type === 'dialogue') {
+      typeInstruction = `
+        Create a natural conversation/dialogue between two specific characters.
+        1. Invent two distinct names for the characters (e.g., "Sarah & John", "Mike & Dave"). DO NOT use "Person A" or "Person B".
+        2. Format the output so that EACH speaker's turn is strictly on a NEW line.
+        3. Format: "Name: Dialogue content".
+      `;
+    } else {
+      typeInstruction = "Create a short, engaging story (approximately 150-200 words).";
+    }
 
     const prompt = `
-      Create a short, engaging story (approximately 150-200 words) suitable for an English learner.
+      ${typeInstruction} suitable for an English learner.
       ${themeStr}
       
-      You MUST use the following vocabulary words in the story:
+      You MUST use the following vocabulary words in the content:
       ${wordListStr}
 
       IMPORTANT: 
       1. Wrap every occurrence of the required vocabulary words in <b>...</b> tags (e.g., <b>word</b>).
-      2. The story should be simple but grammatically correct.
-      3. Provide a full Vietnamese translation of the story.
+      2. The content should be simple but grammatically correct.
+      3. Provide a full Vietnamese translation of the content.
+      4. CRITICAL: Identify and analyze 2 to 3 interesting grammatical structures, tenses, or idioms used. This is for an educational section.
 
       Output JSON format:
       {
-        "english": "The story in English with <b>tags</b>",
-        "vietnamese": "The full Vietnamese translation"
+        "english": "The story/dialogue in English with <b>tags</b>. If dialogue, use newlines (\\n) for each speaker.",
+        "vietnamese": "The full Vietnamese translation",
+        "grammarPoints": [
+          {
+            "structure": "Name of the grammar structure (e.g., Past Perfect, Conditional Type 1, Gerunds)",
+            "explanation": "Brief explanation of how/why it is used in this specific context",
+            "exampleInStory": "Quote the exact sentence from the text",
+            "memoryTip": "A short, memorable tip or rule for this grammar point"
+          }
+        ]
       }
     `;
 
@@ -91,6 +112,18 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
           properties: {
             english: { type: Type.STRING },
             vietnamese: { type: Type.STRING },
+            grammarPoints: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  structure: { type: Type.STRING },
+                  explanation: { type: Type.STRING },
+                  exampleInStory: { type: Type.STRING },
+                  memoryTip: { type: Type.STRING },
+                }
+              }
+            }
           },
         },
       }
@@ -103,7 +136,11 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
   } catch (error) {
     console.error("Gemini Story Generation Error:", error);
     // Fallback in case JSON parsing fails, though rare with correct config
-    return { english: "Could not generate story.", vietnamese: "Không thể tạo bản dịch." };
+    return { 
+      english: "Could not generate content.", 
+      vietnamese: "Không thể tạo nội dung.",
+      grammarPoints: []
+    };
   }
 };
 

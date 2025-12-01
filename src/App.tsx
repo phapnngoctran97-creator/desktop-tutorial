@@ -10,7 +10,8 @@ import {
   TrashIcon, 
   ArrowPathIcon,
   SpeakerWaveIcon,
-  XMarkIcon
+  XMarkIcon,
+  AcademicCapIcon
 } from './components/Icons';
 
 // Constants
@@ -18,6 +19,16 @@ const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 const STORAGE_KEY_HISTORY = 'vocastory_history';
 const STORAGE_KEY_STORY = 'vocastory_stories';
 const STORAGE_KEY_LAST_GEN = 'vocastory_last_gen_time';
+
+const SUGGESTED_THEMES = [
+  "Cuộc sống hàng ngày",
+  "Du lịch & Khám phá",
+  "Công việc & Kinh doanh",
+  "Tình bạn & Gia đình",
+  "Khoa học & Công nghệ",
+  "Phiêu lưu giả tưởng",
+  "Đồ ăn & Ẩm thực"
+];
 
 const App: React.FC = () => {
   // State
@@ -29,12 +40,15 @@ const App: React.FC = () => {
   const [isLoadingTranslate, setIsLoadingTranslate] = useState(false);
   const [isLoadingStory, setIsLoadingStory] = useState(false);
   const [storyTheme, setStoryTheme] = useState('');
+  const [storyType, setStoryType] = useState<'story' | 'dialogue'>('story');
   
   // New State for Bilingual & Lookup Features
   const [showVietnamese, setShowVietnamese] = useState<Record<string, boolean>>({});
+  const [showGrammar, setShowGrammar] = useState<Record<string, boolean>>({}); // State for hiding/showing grammar
   const [selectedWord, setSelectedWord] = useState<WordDefinition | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   
   // Derived State
   const timeSinceLastGen = Date.now() - lastGenTime;
@@ -142,15 +156,17 @@ const App: React.FC = () => {
     setIsLoadingStory(true);
     try {
       const wordList = targetWords.map(w => w.english);
-      const result = await generateStoryFromWords(wordList, storyTheme);
+      // Pass the storyType to the service
+      const result = await generateStoryFromWords(wordList, storyTheme, storyType);
 
       const newStory: GeneratedStory = {
         id: Date.now().toString(),
         content: result.english,
         vietnameseContent: result.vietnamese,
+        grammarPoints: result.grammarPoints,
         timestamp: Date.now(),
         vocabularyUsed: wordList,
-        theme: storyTheme || 'General',
+        theme: (storyType === 'dialogue' ? '💬 Hội thoại - ' : '📖 Truyện ngắn - ') + (storyTheme || 'General'),
       };
 
       setStories(prev => [newStory, ...prev]);
@@ -162,7 +178,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoadingStory(false);
     }
-  }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen]);
+  }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen, storyType]);
 
   const handleClearHistory = () => {
     if (window.confirm("Bạn có chắc muốn xóa toàn bộ lịch sử?")) {
@@ -175,8 +191,11 @@ const App: React.FC = () => {
 
   const handleDeleteWord = (id: string, e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent event bubbling
-    // Removed window.confirm for instant deletion as requested
     setHistory(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleDeleteStory = (id: string) => {
+    setStories(prev => prev.filter(story => story.id !== id));
   };
 
   const handleWordClick = async (word: string, context: string, event: React.MouseEvent) => {
@@ -200,6 +219,10 @@ const App: React.FC = () => {
 
   const toggleVietnamese = (storyId: string) => {
     setShowVietnamese(prev => ({ ...prev, [storyId]: !prev[storyId] }));
+  };
+
+  const toggleGrammar = (storyId: string) => {
+    setShowGrammar(prev => ({ ...prev, [storyId]: !prev[storyId] }));
   };
 
   // Helper to decode Raw PCM Data from Gemini
@@ -244,6 +267,7 @@ const App: React.FC = () => {
       
       const source = outputAudioContext.createBufferSource();
       source.buffer = audioBuffer;
+      source.playbackRate.value = playbackSpeed; // Apply playback speed
       source.connect(outputAudioContext.destination);
       
       source.onended = () => {
@@ -265,7 +289,7 @@ const App: React.FC = () => {
     const parts = content.split(/(<b>.*?<\/b>)/g);
 
     return (
-      <div className="leading-relaxed">
+      <div className="leading-loose whitespace-pre-wrap font-medium">
         {parts.map((part, index) => {
           if (part.startsWith('<b>') && part.endsWith('</b>')) {
             const innerText = part.replace(/<\/?b>/g, '');
@@ -273,7 +297,7 @@ const App: React.FC = () => {
               <span 
                 key={index} 
                 onClick={(e) => handleWordClick(innerText, content, e)}
-                className="font-bold text-yellow-300 cursor-pointer hover:bg-white/20 px-0.5 rounded transition-colors"
+                className="font-extrabold text-amber-300 cursor-pointer bg-amber-500/20 hover:bg-amber-500/40 px-1.5 py-0.5 rounded transition-all shadow-[0_0_12px_rgba(245,158,11,0.3)] border border-amber-500/30 mx-0.5"
               >
                 {innerText}
               </span>
@@ -297,6 +321,29 @@ const App: React.FC = () => {
             );
           }
         })}
+      </div>
+    );
+  };
+
+  const SpeedSelector = ({ theme = 'light' }: { theme?: 'light' | 'dark' }) => {
+    const bgClass = theme === 'dark' ? 'bg-white/10 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-100';
+    const accentClass = theme === 'dark' ? 'accent-green-400' : 'accent-indigo-500';
+
+    return (
+      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${bgClass} transition-colors`} onClick={(e) => e.stopPropagation()}>
+        <span className="text-[10px] font-bold uppercase tracking-wider min-w-[30px] text-center">
+          {playbackSpeed.toFixed(1)}x
+        </span>
+        <input 
+          type="range"
+          min="0.5"
+          max="2.0"
+          step="0.1"
+          value={playbackSpeed}
+          onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+          className={`w-20 h-1.5 bg-gray-300/50 rounded-lg appearance-none cursor-pointer ${accentClass}`}
+          title="Điều chỉnh tốc độ đọc"
+        />
       </div>
     );
   };
@@ -375,20 +422,22 @@ const App: React.FC = () => {
             <div className="flex-grow flex items-center justify-center p-4 bg-indigo-50 rounded-xl border border-indigo-100 min-h-[140px]">
               {translatedResult ? (
                 <div className="w-full text-center animate-fade-in flex flex-col items-center">
-                  <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-3 mb-3">
+                  <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-3 mb-3 flex-wrap">
                     <p className="text-xl md:text-3xl font-bold text-indigo-900 break-words flex items-center gap-2">
                       {translatedResult.english}
-                      <button 
-                        onClick={() => playAudio(translatedResult.english)}
-                        disabled={isPlayingAudio}
-                        className={`p-2 rounded-full transition-colors ${isPlayingAudio ? 'text-gray-400 bg-gray-100' : 'text-indigo-500 hover:bg-indigo-100'}`}
-                        title="Nghe phát âm"
-                      >
-                         <SpeakerWaveIcon className={`w-5 h-5 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
-                      </button>
+                      <div className="flex items-center gap-2 ml-2">
+                         <button 
+                          onClick={() => playAudio(translatedResult.english)}
+                          disabled={isPlayingAudio}
+                          className={`p-2 rounded-full transition-all shadow-sm ${isPlayingAudio ? 'bg-indigo-100 text-indigo-400' : 'bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-100'}`}
+                          title="Nghe phát âm"
+                        >
+                           <SpeakerWaveIcon className={`w-5 h-5 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+                        </button>
+                      </div>
                     </p>
                     {translatedResult.phonetic && (
-                      <span className="text-sm font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                      <span className="text-sm font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded border border-gray-200">
                         {translatedResult.phonetic}
                       </span>
                     )}
@@ -398,6 +447,11 @@ const App: React.FC = () => {
                       </span>
                     )}
                   </div>
+                  
+                  <div className="mb-4">
+                     <SpeedSelector theme="light" />
+                  </div>
+
                   {translatedResult.usageHint && (
                     <div className="mt-2 text-sm text-indigo-600 bg-white/50 px-4 py-2 rounded-lg italic inline-block max-w-[90%] border border-indigo-100/50">
                       💡 {translatedResult.usageHint}
@@ -474,7 +528,7 @@ const App: React.FC = () => {
                   Ôn Tập Qua Truyện
                 </h2>
                 <p className="text-indigo-200 text-sm">
-                  Hệ thống tạo truyện song ngữ mỗi 10 tiếng. Nhấn vào bất kỳ từ tiếng Anh nào để tra nghĩa.
+                  Hệ thống tạo truyện/hội thoại song ngữ mỗi 10 tiếng.
                 </p>
               </div>
 
@@ -497,6 +551,22 @@ const App: React.FC = () => {
                 </div>
               </div>
 
+              {/* Story Type Selector */}
+              <div className="flex gap-2 p-1 bg-white/10 rounded-xl">
+                 <button
+                    onClick={() => setStoryType('story')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${storyType === 'story' ? 'bg-white text-indigo-900 shadow-md' : 'text-indigo-200 hover:text-white'}`}
+                 >
+                    📖 Truyện Ngắn
+                 </button>
+                 <button
+                    onClick={() => setStoryType('dialogue')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${storyType === 'dialogue' ? 'bg-white text-indigo-900 shadow-md' : 'text-indigo-200 hover:text-white'}`}
+                 >
+                    💬 Hội Thoại
+                 </button>
+              </div>
+
               <div className="space-y-3">
                 <input 
                   type="text" 
@@ -505,79 +575,158 @@ const App: React.FC = () => {
                   placeholder="Chủ đề (VD: Adventure)..."
                   className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-sm text-white placeholder-indigo-300 focus:outline-none focus:ring-2 focus:ring-white/30"
                 />
+                
+                {/* Suggested Themes */}
+                <div className="flex flex-wrap gap-2">
+                   {SUGGESTED_THEMES.map(theme => (
+                     <button
+                        key={theme}
+                        onClick={() => setStoryTheme(theme)}
+                        className="text-[10px] sm:text-xs bg-indigo-500/30 hover:bg-indigo-500/50 border border-indigo-400/30 text-indigo-100 px-2 py-1 rounded-full transition-colors"
+                     >
+                        {theme}
+                     </button>
+                   ))}
+                </div>
+
                 <button
                   onClick={() => handleGenerateStory(true)} 
                   disabled={isLoadingStory || history.length < 2}
-                  className="w-full py-3 bg-white text-indigo-900 rounded-xl font-bold shadow-lg hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                  className="w-full py-3 bg-white text-indigo-900 rounded-xl font-bold shadow-lg hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 mt-4"
                 >
                   {isLoadingStory ? (
                      <ArrowPathIcon className="w-5 h-5 animate-spin" />
                   ) : (
                     <SparklesIcon className="w-5 h-5" />
                   )}
-                  {isReadyForStory ? 'Tạo Câu Chuyện Ngay' : 'Tạo Ngay (Bỏ qua chờ)'}
+                  {isReadyForStory ? 'Tạo Nội Dung Ngay' : 'Tạo Ngay (Bỏ qua chờ)'}
                 </button>
               </div>
             </div>
 
             {/* Story Display */}
-            <div className="lg:col-span-2 bg-white/5 rounded-2xl border border-white/10 p-6 max-h-[600px] overflow-y-auto custom-scrollbar flex flex-col gap-6">
+            <div className="lg:col-span-2 bg-white/5 rounded-2xl border border-white/10 p-6 max-h-[700px] overflow-y-auto custom-scrollbar flex flex-col gap-6">
               {stories.length > 0 ? (
                 <div className="space-y-8">
                   {stories.map((story, index) => (
                     <div key={story.id} className="animate-fade-in group">
-                      <div className="flex items-center justify-between mb-4 border-b border-white/10 pb-2">
-                        <span className="text-xs font-medium uppercase tracking-wider text-indigo-300 bg-indigo-900/50 px-2 py-1 rounded">
-                          {story.theme}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          <button 
-                            onClick={() => playAudio(story.content)}
-                            disabled={isPlayingAudio}
-                            className={`text-xs px-2 py-1 rounded transition-colors flex items-center gap-1 ${isPlayingAudio ? 'bg-white/20 text-gray-300' : 'bg-white/10 hover:bg-white/20 text-indigo-100'}`}
-                          >
-                            <SpeakerWaveIcon className={`w-3 h-3 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
-                            {isPlayingAudio ? 'Đang đọc...' : 'Nghe truyện'}
-                          </button>
+                      <div className="flex flex-wrap items-center justify-between mb-4 border-b border-white/10 pb-2 gap-2">
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium uppercase tracking-wider text-indigo-300 bg-indigo-900/50 px-2 py-1 rounded">
+                              {story.theme}
+                            </span>
+                            <span className="text-xs text-indigo-300">
+                                {new Date(story.timestamp).toLocaleDateString()}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 bg-white/10 rounded-lg px-2 py-1">
+                            <SpeedSelector theme="dark" />
+                            <div className="h-4 w-[1px] bg-white/20"></div>
+                            <button 
+                              onClick={() => playAudio(story.content)}
+                              disabled={isPlayingAudio}
+                              className={`text-xs p-1.5 rounded transition-colors ${isPlayingAudio ? 'bg-white/20 text-green-300' : 'hover:bg-white/20 text-white'}`}
+                              title="Nghe câu chuyện"
+                            >
+                              <SpeakerWaveIcon className={`w-4 h-4 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+                            </button>
+                          </div>
+
                           <button 
                             onClick={() => toggleVietnamese(story.id)}
-                            className="text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-indigo-100 transition-colors flex items-center gap-1"
+                            className="text-xs bg-white/10 hover:bg-white/20 px-2 py-1.5 rounded text-indigo-100 transition-colors flex items-center gap-1 h-[34px]"
                           >
-                            <LanguageIcon className="w-3 h-3" />
-                            {showVietnamese[story.id] ? 'Ẩn Tiếng Việt' : 'Hiện Song Ngữ'}
+                            <LanguageIcon className="w-3.5 h-3.5" />
+                            {showVietnamese[story.id] ? 'Ẩn' : 'Dịch'}
                           </button>
-                          <span className="text-xs text-indigo-300">
-                            {new Date(story.timestamp).toLocaleDateString()}
-                          </span>
+                          
+                          <button
+                            onClick={() => handleDeleteStory(story.id)}
+                            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 px-2 py-1.5 rounded transition-colors h-[34px]"
+                            title="Xóa câu chuyện"
+                          >
+                             <TrashIcon className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                       
                       {/* English Content */}
-                      <div className="prose prose-invert prose-lg max-w-none text-indigo-50 mb-4">
+                      <div className="prose prose-invert prose-lg max-w-none text-indigo-50 mb-6">
                          <InteractiveStoryText content={story.content} />
+                      </div>
+
+                      {/* Vocabulary list used */}
+                      <div className="flex flex-wrap gap-2 mb-6">
+                          {story.vocabularyUsed.map((word, i) => (
+                            <span key={i} className="text-xs bg-white/10 px-2 py-1 rounded text-indigo-200 font-medium border border-white/5">
+                              {word}
+                            </span>
+                          ))}
                       </div>
 
                       {/* Vietnamese Content (Collapsible) */}
                       {showVietnamese[story.id] && (
-                        <div className="bg-indigo-950/50 p-4 rounded-xl border border-indigo-500/20 animate-fade-in mt-4">
+                        <div className="bg-indigo-950/50 p-4 rounded-xl border border-indigo-500/20 animate-fade-in mb-6">
                           <h4 className="text-xs font-bold text-indigo-300 uppercase mb-2">Bản dịch tiếng việt</h4>
-                          <p className="text-indigo-200 text-sm leading-relaxed">
+                          <p className="text-indigo-200 text-sm leading-relaxed whitespace-pre-line">
                             {story.vietnameseContent || "Chưa có bản dịch cho câu chuyện này."}
                           </p>
                         </div>
                       )}
-
-                      <div className="mt-4 pt-4 border-t border-white/10">
-                        <p className="text-xs text-indigo-300 mb-2">Vocabulary used:</p>
-                        <div className="flex flex-wrap gap-2">
-                          {story.vocabularyUsed.map((word, i) => (
-                            <span key={i} className="text-xs bg-white/10 px-2 py-1 rounded text-white font-medium border border-white/5">
-                              {word}
-                            </span>
-                          ))}
+                      
+                      {/* Grammar Analysis Section (Collapsible Button) */}
+                      {story.grammarPoints && story.grammarPoints.length > 0 ? (
+                        <div className="mt-4 pt-4 border-t border-white/10">
+                           {!showGrammar[story.id] ? (
+                             <button 
+                                onClick={() => toggleGrammar(story.id)}
+                                className="w-full flex items-center justify-center gap-2 py-3 bg-teal-900/30 hover:bg-teal-900/50 text-teal-300 rounded-xl border border-teal-500/20 transition-all font-semibold text-sm"
+                             >
+                                <AcademicCapIcon className="w-5 h-5" />
+                                🔍 Xem Phân Tích Ngữ Pháp
+                             </button>
+                           ) : (
+                             <div className="animate-fade-in bg-teal-950/30 rounded-xl p-1 border border-teal-500/20">
+                                <button 
+                                   onClick={() => toggleGrammar(story.id)}
+                                   className="w-full text-center py-2 text-xs text-teal-500/70 hover:text-teal-400 mb-2 uppercase tracking-wide font-bold"
+                                >
+                                   Ẩn phân tích
+                                </button>
+                                <div className="px-4 pb-4 grid grid-cols-1 gap-4">
+                                  {story.grammarPoints.map((point, gIndex) => (
+                                    <div key={gIndex} className="bg-teal-900/40 rounded-xl p-4 border border-teal-500/20 hover:bg-teal-900/60 transition-colors">
+                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2 gap-1">
+                                        <h5 className="font-bold text-teal-200 text-sm">{point.structure}</h5>
+                                        <span className="text-[10px] bg-teal-500/10 text-teal-300 px-2 py-0.5 rounded border border-teal-500/10">Cấu trúc</span>
+                                      </div>
+                                      <p className="text-xs text-gray-300 mb-3 leading-relaxed">{point.explanation}</p>
+                                      
+                                      <div className="space-y-2">
+                                          <div className="bg-black/20 rounded-lg px-3 py-2 border-l-2 border-teal-500/50">
+                                            <p className="text-xs italic text-teal-100">"{point.exampleInStory}"</p>
+                                          </div>
+                                          <div className="flex items-start gap-1.5 text-xs text-green-300/90">
+                                            <span className="mt-0.5">💡</span>
+                                            <span>{point.memoryTip}</span>
+                                          </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                             </div>
+                           )}
                         </div>
-                      </div>
-                      {index < stories.length - 1 && <div className="my-8 border-b border-white/10"></div>}
+                      ) : (
+                         <div className="mt-6 pt-4 border-t border-white/5 text-center">
+                            <p className="text-xs text-indigo-400 italic">
+                               * Tạo câu chuyện mới để xem phân tích ngữ pháp chi tiết.
+                            </p>
+                         </div>
+                      )}
+
+                      {index < stories.length - 1 && <div className="my-8 border-b border-white/5"></div>}
                     </div>
                   ))}
                 </div>

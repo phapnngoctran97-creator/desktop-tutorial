@@ -47,3 +47,9 @@ export const XMarkIcon = ({ className }: { className?: string }) => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
   </svg>
 );
+
+export const AcademicCapIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.499 5.221 69.17 69.17 0 00-2.66.812M12 14.95a3.15 3.15 0 00-3.15-3.15h-3c-.132 0-.259.038-.371.106a3.152 3.152 0 00-1.467 2.102 3.15 3.15 0 00.748 3.14l1.344 1.344a3.15 3.15 0 003.882.49 3.15 3.15 0 001.014-4.032z" />
+  </svg>
+);
