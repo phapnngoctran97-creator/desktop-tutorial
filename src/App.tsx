@@ -70,6 +70,7 @@ const App: React.FC = () => {
   const rafRef = useRef<number | null>(null); // Request Animation Frame ref
   const audioStartTimeRef = useRef<number>(0);
   const audioDurationRef = useRef<number>(0);
+  const lastAudioVoiceRef = useRef<string>(''); // Track which voice generated the current audio
 
   // Derived State
   const timeSinceLastGen = Date.now() - lastGenTime;
@@ -280,12 +281,15 @@ const App: React.FC = () => {
     
     // Stop Gemini Audio
     if (audioSourceRef.current) {
-        try { audioSourceRef.current.stop(); } catch(e) {}
+        try { 
+            audioSourceRef.current.stop();
+            audioSourceRef.current.disconnect();
+        } catch(e) {}
         audioSourceRef.current = null;
     }
-    if (audioContextRef.current) {
-        audioContextRef.current.suspend();
-    }
+    // Do not suspend here immediately if we plan to play something else, 
+    // but resetting state is crucial.
+    
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -307,37 +311,49 @@ const App: React.FC = () => {
   const handleAudioToggle = async (id: string, text: string, forceGemini: boolean = false, isDialogue: boolean = false) => {
     // 1. If clicking the SAME active item
     if (activeAudioId === id) {
-        if (isPaused) {
-            // RESUME
-            if (forceGemini || text.length >= 150) {
-                audioContextRef.current?.resume();
-            } else {
-                window.speechSynthesis.resume();
-            }
-            setIsPaused(false);
+        // If the voice has changed, we must STOP and RE-GENERATE
+        if (forceGemini && lastAudioVoiceRef.current !== selectedVoice) {
+             stopAllAudio();
+             // Allow fall-through to start new audio
         } else {
-            // PAUSE
-            if (forceGemini || text.length >= 150) {
-                audioContextRef.current?.suspend();
+            // Toggle Pause/Resume
+            if (isPaused) {
+                // RESUME
+                if (forceGemini || text.length >= 150) {
+                    await audioContextRef.current?.resume();
+                } else {
+                    window.speechSynthesis.resume();
+                }
+                setIsPaused(false);
             } else {
-                window.speechSynthesis.pause();
+                // PAUSE
+                if (forceGemini || text.length >= 150) {
+                    await audioContextRef.current?.suspend();
+                } else {
+                    window.speechSynthesis.pause();
+                }
+                setIsPaused(true);
             }
-            setIsPaused(true);
+            return;
         }
-        return;
+    } else {
+        // If clicking a different item, stop previous
+        stopAllAudio();
     }
 
-    // 2. If clicking a NEW item
-    stopAllAudio(); // Clear previous
+    // 2. Start NEW audio
     setActiveAudioId(id);
     setIsLoadingAudio(true);
     setAudioProgress(0);
+    lastAudioVoiceRef.current = selectedVoice; // Record the voice used
 
     // Initialize/Resume Audio Context (Required for mobile)
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!audioContextRef.current) {
         audioContextRef.current = new AudioContextClass();
     }
+    
+    // Always ensure context is running before starting new playback
     if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
     }
@@ -410,30 +426,40 @@ const App: React.FC = () => {
         source.connect(ctx.destination);
         
         audioSourceRef.current = source;
+        // Important: Reset start time reference to now
         audioStartTimeRef.current = ctx.currentTime;
         audioDurationRef.current = audioBuffer.duration / playbackSpeed;
 
         // Progress Tracking Loop for Visual Karaoke
         const trackProgress = () => {
-          if (!isPaused && audioContextRef.current?.state === 'running') {
-            const elapsedTime = audioContextRef.current.currentTime - audioStartTimeRef.current;
+          if (!audioContextRef.current) return;
+
+          // If playing (not paused/suspended)
+          if (!isPaused && audioContextRef.current.state === 'running') {
+            const currentTime = audioContextRef.current.currentTime;
+            // Calculate elapsed time from the moment we started this source
+            const elapsedTime = currentTime - audioStartTimeRef.current;
             const progress = Math.min(Math.max(elapsedTime / audioDurationRef.current, 0), 1);
+            
             setAudioProgress(progress);
             
-            if (progress < 1) {
+            if (progress < 1 && activeAudioId === id) {
               rafRef.current = requestAnimationFrame(trackProgress);
             }
-          } else if (isPaused) {
-             // If paused, keep loop alive
+          } else if (isPaused && activeAudioId === id) {
+             // If paused, keep loop alive but don't update progress
              rafRef.current = requestAnimationFrame(trackProgress);
           }
         };
 
         source.onended = () => {
-            setActiveAudioId(null);
-            setIsPaused(false);
-            setAudioProgress(0);
-            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+             // Only clear if this is still the active audio (prevents race conditions)
+             if (activeAudioId === id) {
+                setActiveAudioId(null);
+                setIsPaused(false);
+                setAudioProgress(0);
+                if (rafRef.current) cancelAnimationFrame(rafRef.current);
+             }
         };
         
         source.start();
@@ -452,14 +478,15 @@ const App: React.FC = () => {
     // Determine active state for this story
     const isActive = activeAudioId === storyId;
     
-    // We need to split text into words but preserve structure.
-    // For simplicity of highlighting estimation:
-    // 1. Calculate total estimated word count
-    // 2. Based on audioProgress (0-1), find which word index we are at.
+    // PREPARE WORDS FOR COUNTING
+    // We must count exactly how many visual words exist to map progress 0.0 -> 1.0 to Index
+    // Replace HTML tags with space to ensure "<b>Hello</b>World" becomes "Hello World" not "HelloWorld"
+    const plainText = content.replace(/<\/?[^>]+(>|$)/g, " ");
+    // Split by whitespace to get actual words
+    const allWords = plainText.trim().split(/\s+/).filter(w => w.length > 0);
+    const totalWords = allWords.length;
     
-    // Split by spaces to count words for progress estimation
-    const rawWords = content.replace(/<\/?[^>]+(>|$)/g, "").split(/\s+/).filter(w => w.length > 0);
-    const totalWords = rawWords.length;
+    // Current Index based on Audio Progress
     const currentWordIndex = isActive ? Math.floor(audioProgress * totalWords) : -1;
 
     let globalWordCounter = 0;
@@ -473,7 +500,7 @@ const App: React.FC = () => {
             const innerText = part.replace(/<\/?b>/g, '');
             // Highlight check
             const isHighlighted = isActive && globalWordCounter === currentWordIndex;
-            globalWordCounter++; // Increment count
+            globalWordCounter++; // Increment count (bolded phrase counts as 1 block usually)
 
             return (
               <span 
@@ -490,8 +517,9 @@ const App: React.FC = () => {
           } else {
             return (
               <span key={index}>
-                {part.split(/(\s+)/).map((word, wIndex) => {
-                  if (word.trim().length === 0) return word;
+                {part.split(/(\s+)/).map((token, wIndex) => {
+                  // If token is just whitespace, render it but don't count it
+                  if (token.trim().length === 0) return token;
                   
                   const isHighlighted = isActive && globalWordCounter === currentWordIndex;
                   globalWordCounter++;
@@ -499,13 +527,13 @@ const App: React.FC = () => {
                   return (
                     <span 
                       key={`${index}-${wIndex}`}
-                      onClick={(e) => handleWordClick(word, content, e)}
+                      onClick={(e) => handleWordClick(token, content, e)}
                       className={`cursor-pointer transition-colors px-0.5 rounded
                         ${isHighlighted 
                             ? 'bg-yellow-400/80 text-black font-bold' 
                             : 'hover:underline hover:text-indigo-200'}`}
                     >
-                      {word}
+                      {token}
                     </span>
                   );
                 })}
