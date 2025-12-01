@@ -190,6 +190,7 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
     
     // 1. Thoroughly clean the text
     // Remove HTML tags (<b>), Markdown bold (**), and other artifacts
+    // Note: Do NOT remove colons (:) as they are needed for speaker detection
     const cleanText = text
       .replace(/<\/?[^>]+(>|$)/g, "") // Remove HTML tags
       .replace(/\*\*/g, "")           // Remove Markdown bold
@@ -246,7 +247,7 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-native-audio-preview-09-2025", // Ensure using a model that supports audio generation
+      model: "gemini-2.5-flash-preview-tts", // Correct model for TTS
       contents: [{ parts: [{ text: cleanText }] }],
       config: {
         responseModalities: [Modality.AUDIO],
