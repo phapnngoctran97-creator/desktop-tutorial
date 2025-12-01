@@ -66,9 +66,10 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
     if (type === 'dialogue') {
       typeInstruction = `
         Create a natural conversation/dialogue between two specific characters.
-        1. Invent two distinct names for the characters (e.g., "Sarah & John", "Mike & Dave"). DO NOT use "Person A" or "Person B".
+        1. Invent two distinct names for the characters (e.g., "Sarah", "John", "Mom", "Doctor"). 
         2. Format the output so that EACH speaker's turn is strictly on a NEW line.
-        3. Format: "Name: Dialogue content".
+        3. Format: "Name: Dialogue content". (Example: "Tom: Hello there.")
+        4. Do NOT use "Person A" or "Person B".
       `;
     } else {
       typeInstruction = "Create a short, engaging story (approximately 150-200 words).";
@@ -186,8 +187,16 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
 export const generateSpeech = async (text: string, voice: string = 'Kore', isDialogue: boolean = false): Promise<string | undefined> => {
   try {
     const ai = getAIClient();
-    const cleanText = text.replace(/<\/?[^>]+(>|$)/g, ""); // Remove HTML tags like <b>
     
+    // 1. Thoroughly clean the text
+    // Remove HTML tags (<b>), Markdown bold (**), and other artifacts
+    const cleanText = text
+      .replace(/<\/?[^>]+(>|$)/g, "") // Remove HTML tags
+      .replace(/\*\*/g, "")           // Remove Markdown bold
+      .replace(/\*/g, "")             // Remove asterisks
+      .replace(/#/g, "")              // Remove hashes
+      .trim();
+
     let speechConfig: any = {
         voiceConfig: {
           prebuiltVoiceConfig: { voiceName: voice },
@@ -196,10 +205,18 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
 
     // If it's a dialogue, try to parse speakers and assign multi-speaker config
     if (isDialogue) {
-        // Regex to find "Name:" pattern at the start of lines
-        const speakerRegex = /^([A-Za-z]+):/gm;
+        // IMPROVED REGEX: 
+        // Handles: "Tom:", "**Tom**:", "Mr. Bean:", "Hùng:", " Speaker 1 :"
+        // ^\s*[\*]* : Start of line, optional space, optional asterisks
+        // ([^\:\*\n]+) : Capture the name (anything except colon, asterisk, or newline)
+        // [\*]*\s*: : Optional asterisks, optional space, then Colon
+        const speakerRegex = /^\s*[\*]*\s*([^\:\*\n]+)\s*[\*]*\s*:/gm;
+        
         const matches = [...cleanText.matchAll(speakerRegex)];
-        const uniqueSpeakers = [...new Set(matches.map(m => m[1]))];
+        // Extract names and trim whitespace
+        const uniqueSpeakers = [...new Set(matches.map(m => m[1].trim()))];
+
+        console.log("Detected Speakers:", uniqueSpeakers);
 
         // Only use multi-speaker if we detected exactly 2 or more speakers
         if (uniqueSpeakers.length >= 2) {
@@ -229,7 +246,7 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
+      model: "gemini-2.5-flash-native-audio-preview-09-2025", // Ensure using a model that supports audio generation
       contents: [{ parts: [{ text: cleanText }] }],
       config: {
         responseModalities: [Modality.AUDIO],
