@@ -83,9 +83,9 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
 
       IMPORTANT: 
       1. Wrap every occurrence of the required vocabulary words in <b>...</b> tags (e.g., <b>word</b>).
-      2. The content should be simple but grammatically correct.
+      2. GRAMMAR REQUIREMENT: You MUST intentionally use a variety of grammatical tenses (e.g., Simple Present, Present Continuous, Present Perfect, Simple Past, Future) and sentence structures. This is CRITICAL to help the learner understand how different tenses interact in a context.
       3. Provide a full Vietnamese translation of the content.
-      4. CRITICAL: Identify and analyze 2 to 3 interesting grammatical structures, tenses, or idioms used. This is for an educational section.
+      4. ANALYSIS: Identify and analyze 2 to 3 interesting grammatical structures, tenses, or idioms used in the text.
 
       Output JSON format:
       {
@@ -93,8 +93,8 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
         "vietnamese": "The full Vietnamese translation",
         "grammarPoints": [
           {
-            "structure": "Name of the grammar structure (e.g., Past Perfect, Conditional Type 1, Gerunds)",
-            "explanation": "Brief explanation of how/why it is used in this specific context",
+            "structure": "Name of the grammar structure (e.g., Present Perfect vs Past Simple)",
+            "explanation": "Brief explanation of why this tense/structure was used in this specific context",
             "exampleInStory": "Quote the exact sentence from the text",
             "memoryTip": "A short, memorable tip or rule for this grammar point"
           }
