@@ -183,7 +183,7 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
   }
 };
 
-export const generateSpeech = async (text: string): Promise<string | undefined> => {
+export const generateSpeech = async (text: string, voice: string = 'Kore'): Promise<string | undefined> => {
   try {
     const ai = getAIClient();
     const cleanText = text.replace(/<\/?[^>]+(>|$)/g, ""); // Remove HTML tags like <b>
@@ -195,7 +195,7 @@ export const generateSpeech = async (text: string): Promise<string | undefined> 
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
+            prebuiltVoiceConfig: { voiceName: voice },
           },
         },
       },

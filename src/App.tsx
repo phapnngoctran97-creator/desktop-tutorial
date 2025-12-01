@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse } from './types';
 import { translateText, generateStoryFromWords, lookupWord, generateSpeech } from './services/geminiService';
 import { 
@@ -30,6 +30,13 @@ const SUGGESTED_THEMES = [
   "Đồ ăn & Ẩm thực"
 ];
 
+const VOICE_OPTIONS = [
+  { id: 'Kore', label: '👩 Nữ (Kore)', type: 'female' },
+  { id: 'Fenrir', label: '👨 Nam (Fenrir)', type: 'male' },
+  { id: 'Puck', label: '😐 Nam (Puck)', type: 'male' },
+  { id: 'Charon', label: '👹 Nam trầm (Charon)', type: 'male' }
+];
+
 const App: React.FC = () => {
   // State
   const [inputText, setInputText] = useState('');
@@ -49,7 +56,11 @@ const App: React.FC = () => {
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
   
+  // Audio Context Ref to handle mobile strict policies
+  const audioContextRef = useRef<AudioContext | null>(null);
+
   // Derived State
   const timeSinceLastGen = Date.now() - lastGenTime;
   const isReadyForStory = timeSinceLastGen >= TEN_HOURS_MS || lastGenTime === 0;
@@ -230,7 +241,7 @@ const App: React.FC = () => {
     // Convert Uint8Array to Int16Array (PCM 16-bit)
     const pcm16 = new Int16Array(audioData.buffer);
     const frameCount = pcm16.length;
-    // Create an audio buffer (1 channel, sample rate 24000)
+    // Create an audio buffer with 24kHz sample rate (Gemini Standard)
     const audioBuffer = audioContext.createBuffer(1, frameCount, 24000);
     const channelData = audioBuffer.getChannelData(0);
     
@@ -241,18 +252,76 @@ const App: React.FC = () => {
     return audioBuffer;
   };
 
-  // Audio Playback Helper
-  const playAudio = async (text: string) => {
+  /**
+   * PLAY AUDIO FUNCTION
+   * Strategy:
+   * 1. If text is short (< 150 chars), use Native Browser TTS (Fast, No Latency).
+   * 2. If text is long (stories), use Gemini AI (Better quality, supports PCM).
+   * 3. Always unlock AudioContext immediately on user interaction for Mobile.
+   */
+  const playAudio = async (text: string, forceGemini: boolean = false) => {
     if (isPlayingAudio) return;
+    
+    // Determine gender based on selection for Native TTS best effort
+    const isMale = ['Fenrir', 'Puck', 'Charon'].includes(selectedVoice);
+
+    // STRATEGY 1: NATIVE TTS for short text (Fastest for mobile/vocab)
+    if (!forceGemini && text.length < 150) {
+       try {
+         // Cancel any ongoing speech
+         window.speechSynthesis.cancel();
+         
+         const utterance = new SpeechSynthesisUtterance(text);
+         utterance.lang = 'en-US';
+         utterance.rate = Math.max(0.8, Math.min(playbackSpeed, 1.2)); // Native TTS speed range is different
+         utterance.volume = 1;
+         
+         // Try to pick a voice matching the gender preference
+         const voices = window.speechSynthesis.getVoices();
+         const preferredVoice = voices.find(v => {
+           const name = v.name.toLowerCase();
+           const lang = v.lang;
+           if (!lang.startsWith('en')) return false;
+           
+           if (isMale) return name.includes('male') || name.includes('david') || name.includes('james');
+           return name.includes('female') || name.includes('zira') || name.includes('samantha');
+         });
+
+         if (preferredVoice) {
+           utterance.voice = preferredVoice;
+         }
+         
+         utterance.onstart = () => setIsPlayingAudio(true);
+         utterance.onend = () => setIsPlayingAudio(false);
+         utterance.onerror = () => setIsPlayingAudio(false);
+         
+         window.speechSynthesis.speak(utterance);
+         return;
+       } catch (e) {
+         console.warn("Native TTS failed, falling back to Gemini", e);
+         // Fallback to Gemini if native fails
+       }
+    }
+
+    // STRATEGY 2: GEMINI AI for long text or fallback
     setIsPlayingAudio(true);
 
+    // CRITICAL FOR MOBILE: Create/Resume AudioContext immediately within the click handler
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContextClass();
+    }
+    const ctx = audioContextRef.current;
+    
     try {
-      const base64Audio = await generateSpeech(text);
-      if (!base64Audio) throw new Error("Audio generation failed");
+      // Always resume context (Chrome/iOS policy requires this after user gesture)
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
 
-      // Initialize Audio Context
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      const outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
+      // Pass the selected voice name to the service
+      const base64Audio = await generateSpeech(text, selectedVoice);
+      if (!base64Audio) throw new Error("Audio generation failed");
 
       // Convert Base64 to Uint8Array
       const binaryString = atob(base64Audio);
@@ -262,17 +331,16 @@ const App: React.FC = () => {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Decode PCM Data Manually
-      const audioBuffer = decodePCMData(bytes, outputAudioContext);
+      // Decode PCM Data
+      const audioBuffer = decodePCMData(bytes, ctx);
       
-      const source = outputAudioContext.createBufferSource();
+      const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.playbackRate.value = playbackSpeed; // Apply playback speed
-      source.connect(outputAudioContext.destination);
+      source.connect(ctx.destination);
       
       source.onended = () => {
         setIsPlayingAudio(false);
-        outputAudioContext.close();
       };
       
       source.start();
@@ -280,7 +348,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error("Audio playback failed", error);
       setIsPlayingAudio(false);
-      alert("Không thể phát âm thanh lúc này (Lỗi kết nối hoặc định dạng).");
+      alert("Không thể phát âm thanh. Vui lòng kiểm tra kết nối mạng.");
     }
   };
 
@@ -344,6 +412,29 @@ const App: React.FC = () => {
           className={`w-20 h-1.5 bg-gray-300/50 rounded-lg appearance-none cursor-pointer ${accentClass}`}
           title="Điều chỉnh tốc độ đọc"
         />
+      </div>
+    );
+  };
+
+  const VoiceSelector = ({ theme = 'light' }: { theme?: 'light' | 'dark' }) => {
+    const bgClass = theme === 'dark' ? 'bg-white/10 text-white border-white/20' : 'bg-indigo-50 text-indigo-700 border-indigo-100';
+
+    return (
+      <div className="relative inline-block" onClick={e => e.stopPropagation()}>
+        <select
+          value={selectedVoice}
+          onChange={(e) => setSelectedVoice(e.target.value)}
+          className={`appearance-none cursor-pointer pl-3 pr-8 py-1.5 text-xs font-bold rounded-full border focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all ${bgClass}`}
+        >
+          {VOICE_OPTIONS.map(voice => (
+            <option key={voice.id} value={voice.id} className="text-gray-900 bg-white">
+              {voice.label}
+            </option>
+          ))}
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-current opacity-70">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+        </div>
       </div>
     );
   };
@@ -448,7 +539,8 @@ const App: React.FC = () => {
                     )}
                   </div>
                   
-                  <div className="mb-4">
+                  <div className="mb-4 flex items-center gap-2 justify-center flex-wrap">
+                     <VoiceSelector theme="light" />
                      <SpeedSelector theme="light" />
                   </div>
 
@@ -486,7 +578,12 @@ const App: React.FC = () => {
                   </h3>
                   <div className="flex flex-wrap gap-3">
                     {group.items.map((item) => (
-                      <div key={item.id} className="group relative flex flex-col bg-gray-50 hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 px-4 py-2 rounded-xl transition-all min-w-[140px] max-w-[240px]">
+                      <div 
+                        key={item.id} 
+                        onClick={() => playAudio(item.english)}
+                        className="group relative flex flex-col bg-gray-50 hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 px-4 py-2 rounded-xl transition-all min-w-[140px] max-w-[240px] cursor-pointer active:scale-95"
+                        title="Nhấn để nghe phát âm"
+                      >
                         <button 
                           onClick={(e) => handleDeleteWord(item.id, e)}
                           className="absolute -top-1.5 -right-1.5 p-1 rounded-full bg-red-100 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm border border-red-200 hover:bg-red-200 z-10"
@@ -495,7 +592,10 @@ const App: React.FC = () => {
                           <XMarkIcon className="w-3 h-3" />
                         </button>
                         <div className="flex justify-between items-start mb-1">
-                          <span className="font-semibold text-indigo-700 truncate mr-2">{item.english}</span>
+                          <span className="font-semibold text-indigo-700 truncate mr-2 flex items-center gap-1">
+                            {item.english}
+                            <SpeakerWaveIcon className="w-3 h-3 text-indigo-300 opacity-0 group-hover:opacity-100" />
+                          </span>
                           {item.partOfSpeech && (
                             <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-100 px-1.5 py-0.5 rounded">
                               {item.partOfSpeech.substring(0, 4)}
@@ -621,13 +721,15 @@ const App: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-2 bg-white/10 rounded-lg px-2 py-1">
+                            <VoiceSelector theme="dark" />
+                            <div className="h-4 w-[1px] bg-white/20"></div>
                             <SpeedSelector theme="dark" />
                             <div className="h-4 w-[1px] bg-white/20"></div>
                             <button 
-                              onClick={() => playAudio(story.content)}
+                              onClick={() => playAudio(story.content, true)}
                               disabled={isPlayingAudio}
                               className={`text-xs p-1.5 rounded transition-colors ${isPlayingAudio ? 'bg-white/20 text-green-300' : 'hover:bg-white/20 text-white'}`}
-                              title="Nghe câu chuyện"
+                              title="Nghe câu chuyện (Gemini Voice)"
                             >
                               <SpeakerWaveIcon className={`w-4 h-4 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
                             </button>
