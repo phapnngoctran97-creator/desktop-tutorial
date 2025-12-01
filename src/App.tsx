@@ -65,6 +65,7 @@ const App: React.FC = () => {
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
   const [audioProgress, setAudioProgress] = useState<number>(0); // 0.0 to 1.0 representing playback progress
+  const [highlightedWordIndex, setHighlightedWordIndex] = useState<number>(-1); // For Native TTS exact word tracking
   
   // Audio Context Refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -232,7 +233,7 @@ const App: React.FC = () => {
       
     } catch (error) {
       console.error("Story generation failed", error);
-      alert("Không thể tạo câu chuyện lúc này.");
+      alert("Không thể tạo câu chuyện lúc này. Vui lòng thử lại sau.");
     } finally {
       setIsLoadingStory(false);
     }
@@ -313,8 +314,6 @@ const App: React.FC = () => {
         } catch(e) {}
         audioSourceRef.current = null;
     }
-    // Do not suspend here immediately if we plan to play something else, 
-    // but resetting state is crucial.
     
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
@@ -325,13 +324,14 @@ const App: React.FC = () => {
     setIsPaused(false);
     setIsLoadingAudio(false);
     setAudioProgress(0);
+    setHighlightedWordIndex(-1);
   };
 
   /**
    * Universal Audio Toggle Handler
    * @param id Unique identifier for the audio source
    * @param text The text content to read
-   * @param forceGemini If true, prioritize Gemini API over Native TTS
+   * @param forceGemini If true, try Gemini API first
    * @param isDialogue If true, use multi-speaker mode
    */
   const handleAudioToggle = async (id: string, text: string, forceGemini: boolean = false, isDialogue: boolean = false) => {
@@ -345,16 +345,16 @@ const App: React.FC = () => {
             // Toggle Pause/Resume
             if (isPaused) {
                 // RESUME
-                if (forceGemini || text.length >= 150) {
-                    await audioContextRef.current?.resume();
+                if (audioContextRef.current?.state === 'suspended' && audioSourceRef.current) {
+                    await audioContextRef.current.resume();
                 } else {
                     window.speechSynthesis.resume();
                 }
                 setIsPaused(false);
             } else {
                 // PAUSE
-                if (forceGemini || text.length >= 150) {
-                    await audioContextRef.current?.suspend();
+                if (audioContextRef.current?.state === 'running' && audioSourceRef.current) {
+                    await audioContextRef.current.suspend();
                 } else {
                     window.speechSynthesis.pause();
                 }
@@ -371,6 +371,7 @@ const App: React.FC = () => {
     setActiveAudioId(id);
     setIsLoadingAudio(true);
     setAudioProgress(0);
+    setHighlightedWordIndex(-1);
     lastAudioVoiceRef.current = selectedVoice; // Record the voice used
 
     // Initialize/Resume Audio Context (Required for mobile)
@@ -391,26 +392,58 @@ const App: React.FC = () => {
     const playNativeTTS = (textToSpeak: string) => {
         try {
             // Clean text for native TTS
-            const cleanText = textToSpeak.replace(/<\/?[^>]+(>|$)/g, "").replace(/\*\*/g, "");
+            // Remove tags and markdown for reading, but keep content
+            const cleanText = textToSpeak
+                .replace(/<\/?[^>]+(>|$)/g, " ") // Replace tags with space
+                .replace(/\*\*/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+
             const utterance = new SpeechSynthesisUtterance(cleanText);
             utterance.lang = 'en-US';
-            utterance.rate = Math.max(0.8, Math.min(playbackSpeed, 1.2)); 
+            utterance.rate = Math.max(0.7, Math.min(playbackSpeed, 1.3)); // Native TTS speed limits
             utterance.volume = 1;
             
             const voices = window.speechSynthesis.getVoices();
+            // Try to find a matching gender voice if possible
             const preferredVoice = voices.find(v => {
               const name = v.name.toLowerCase();
               const lang = v.lang;
               if (!lang.startsWith('en')) return false;
               
-              if (isMale) return name.includes('male') || name.includes('david');
-              return name.includes('female') || name.includes('zira');
+              if (isMale) return name.includes('male') || name.includes('david') || name.includes('james');
+              return name.includes('female') || name.includes('zira') || name.includes('google us english');
             });
 
             if (preferredVoice) utterance.voice = preferredVoice;
             
-            utterance.onend = () => { setActiveAudioId(null); setIsLoadingAudio(false); setAudioProgress(0); };
-            utterance.onerror = () => { setActiveAudioId(null); setIsLoadingAudio(false); setAudioProgress(0); };
+            // Events for state management
+            utterance.onend = () => { 
+                setActiveAudioId(null); 
+                setIsLoadingAudio(false); 
+                setAudioProgress(0);
+                setHighlightedWordIndex(-1);
+            };
+            utterance.onerror = (e) => { 
+                console.warn("Native TTS Error", e);
+                setActiveAudioId(null); 
+                setIsLoadingAudio(false); 
+                setAudioProgress(0);
+            };
+
+            // Karaoke for Native TTS using onboundary
+            // 'word' boundary gives us the char index
+            utterance.onboundary = (event) => {
+                if (event.name === 'word') {
+                    // Approximate mapping: Count spaces before this char index
+                    const textBefore = cleanText.substring(0, event.charIndex);
+                    const wordCount = textBefore.trim().split(/\s+/).length;
+                    setHighlightedWordIndex(wordCount);
+                    // Also update general progress for slider if we had one
+                    const estimatedProgress = event.charIndex / cleanText.length;
+                    setAudioProgress(estimatedProgress);
+                }
+            };
             
             setIsLoadingAudio(false); 
             window.speechSynthesis.speak(utterance);
@@ -422,6 +455,7 @@ const App: React.FC = () => {
     };
 
     // STRATEGY 1: NATIVE TTS for short text (Fastest)
+    // OR if Gemini was not forced
     if (!forceGemini && text.length < 150) {
         playNativeTTS(text);
         return;
@@ -433,7 +467,7 @@ const App: React.FC = () => {
         const base64Audio = await generateSpeech(text, selectedVoice, isDialogue);
         
         // If Gemini fails (returns undefined), throw error to trigger catch block
-        if (!base64Audio) throw new Error("Gemini Audio generation returned empty");
+        if (!base64Audio) throw new Error("Gemini Audio generation returned empty (likely rate limit or safety)");
 
         // Convert Base64 to Uint8Array
         const binaryString = atob(base64Audio);
@@ -456,7 +490,8 @@ const App: React.FC = () => {
         audioStartTimeRef.current = ctx.currentTime;
         audioDurationRef.current = audioBuffer.duration / playbackSpeed;
 
-        // Progress Tracking Loop for Visual Karaoke
+        // Progress Tracking Loop for Visual Karaoke (Gemini)
+        // Since Gemini sends raw audio without timestamps, we use linear interpolation
         const trackProgress = () => {
           if (!audioContextRef.current) return;
 
@@ -495,6 +530,7 @@ const App: React.FC = () => {
     } catch (error) {
         console.warn("Gemini Audio failed, switching to Native TTS fallback", error);
         // ULTIMATE FALLBACK: Use Browser Native TTS if Gemini fails
+        // This ensures the user ALWAYS hears something, treating it as "normal text"
         playNativeTTS(text);
     }
   };
@@ -506,14 +542,21 @@ const App: React.FC = () => {
     
     // PREPARE WORDS FOR COUNTING
     // We must count exactly how many visual words exist to map progress 0.0 -> 1.0 to Index
-    // Replace HTML tags with space to ensure "<b>Hello</b>World" becomes "Hello World" not "HelloWorld"
     const plainText = content.replace(/<\/?[^>]+(>|$)/g, " ");
-    // Split by whitespace to get actual words
     const allWords = plainText.trim().split(/\s+/).filter(w => w.length > 0);
     const totalWords = allWords.length;
     
-    // Current Index based on Audio Progress
-    const currentWordIndex = isActive ? Math.floor(audioProgress * totalWords) : -1;
+    // Determine current index based on Source (Gemini vs Native)
+    // If highlightedWordIndex > -1, we are using Native TTS with precise boundary events
+    // Otherwise we use audioProgress (Gemini Linear Interpolation)
+    let currentWordIndex = -1;
+    if (isActive) {
+        if (highlightedWordIndex > -1) {
+            currentWordIndex = highlightedWordIndex;
+        } else {
+            currentWordIndex = Math.floor(audioProgress * totalWords);
+        }
+    }
 
     let globalWordCounter = 0;
 
@@ -718,19 +761,14 @@ const App: React.FC = () => {
                         {translatedResult.english}
                       </p>
                       
-                      {/* Audio Button - Only show if the result is English OR if input was English (we want to hear English) */}
-                      {/* Actually, if direction is vi_en, result is English. If en_vi, input is English. */}
-                      {/* Let's simplify: Play audio for the English text involved. */}
                       <button 
                         onClick={() => {
-                            // If direction is vi_en, we play the Result (English)
-                            // If direction is en_vi, we play the Input (English)
                             const textToRead = direction === 'vi_en' ? translatedResult.english : inputText;
                             handleAudioToggle('translate_res', textToRead);
                         }}
                         disabled={isLoadingAudio && activeAudioId === 'translate_res'}
                         className={`p-2 rounded-full transition-all shadow-sm ${activeAudioId === 'translate_res' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-100'}`}
-                        title={activeAudioId === 'translate_res' && !isPaused ? "Tạm dừng" : "Nghe tiếng Anh"}
+                        title={activeAudioId === 'translate_res' && !isPaused ? "Tạm dừng" : "Nghe"}
                       >
                          {activeAudioId === 'translate_res' && !isPaused ? (
                            <PauseIcon className="w-5 h-5" />
@@ -952,7 +990,7 @@ const App: React.FC = () => {
                               onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
                               disabled={isLoadingAudio && activeAudioId === story.id}
                               className={`text-xs p-1.5 rounded transition-colors flex items-center gap-1 ${activeAudioId === story.id ? 'bg-white text-indigo-900 font-bold' : 'hover:bg-white/20 text-white'}`}
-                              title={activeAudioId === story.id && !isPaused ? "Tạm dừng đọc" : "Nghe câu chuyện (Gemini Voice)"}
+                              title={activeAudioId === story.id && !isPaused ? "Tạm dừng đọc" : "Nghe câu chuyện (AI/Native)"}
                             >
                               {activeAudioId === story.id ? (
                                 <>

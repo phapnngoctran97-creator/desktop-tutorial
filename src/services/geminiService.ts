@@ -225,8 +225,6 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
   const ai = getAIClient();
   
   // 1. Thoroughly clean the text while preserving structure for speaker detection
-  // Remove HTML tags (<b>), Markdown bold (**), and other artifacts
-  // Note: Do NOT remove colons (:) as they are needed for speaker detection
   const cleanText = text
     .replace(/<\/?[^>]+(>|$)/g, "") // Remove HTML tags
     .replace(/\*\*/g, "")           // Remove Markdown bold
@@ -237,14 +235,11 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
   // ATTEMPT 1: Multi-speaker (if applicable)
   if (isDialogue) {
     try {
-      // Improved regex to capture names before colons, handling spaces and Unicode
       const speakerRegex = /^\s*([^\:\n]+)\s*:/gm;
       const matches = [...cleanText.matchAll(speakerRegex)];
       const uniqueSpeakers = [...new Set(matches.map(m => m[1].trim()))];
 
-      // Only proceed if exactly 2 speakers are clearly identified to avoid API errors
       if (uniqueSpeakers.length >= 2) {
-        console.log("Attempting Multi-speaker TTS with:", uniqueSpeakers);
         const speaker1 = uniqueSpeakers[0];
         const speaker2 = uniqueSpeakers[1];
 
@@ -278,14 +273,12 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
         if (audioData) return audioData;
       }
     } catch (error) {
-      console.warn("Multi-speaker TTS failed, falling back to single speaker...", error);
-      // Do not return here; let it fall through to the single speaker logic
+      console.warn("Multi-speaker TTS failed, falling back to single speaker...");
     }
   }
 
-  // ATTEMPT 2: Fallback to Single Speaker (Guaranteed to work if API is up)
+  // ATTEMPT 2: Fallback to Single Speaker
   try {
-    console.log("Using Single-speaker TTS Fallback");
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text: cleanText }] }],
@@ -302,7 +295,8 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
 
     return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   } catch (error) {
-    console.error("TTS Fatal Error:", error);
+    // Return undefined to trigger Native TTS fallback in App.tsx
+    // Do NOT throw error here, just return empty so UI handles it gracefully
     return undefined;
   }
 };
