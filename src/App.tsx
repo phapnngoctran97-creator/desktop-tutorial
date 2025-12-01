@@ -10,6 +10,7 @@ import {
   TrashIcon, 
   ArrowPathIcon,
   SpeakerWaveIcon,
+  PauseIcon,
   XMarkIcon,
   AcademicCapIcon
 } from './components/Icons';
@@ -54,12 +55,21 @@ const App: React.FC = () => {
   const [showGrammar, setShowGrammar] = useState<Record<string, boolean>>({}); // State for hiding/showing grammar
   const [selectedWord, setSelectedWord] = useState<WordDefinition | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  
+  // Audio State
+  const [activeAudioId, setActiveAudioId] = useState<string | null>(null); // Track ID of currently playing/paused item
+  const [isPaused, setIsPaused] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
+  const [audioProgress, setAudioProgress] = useState<number>(0); // 0.0 to 1.0 representing playback progress
   
-  // Audio Context Ref to handle mobile strict policies
+  // Audio Context Refs
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const rafRef = useRef<number | null>(null); // Request Animation Frame ref
+  const audioStartTimeRef = useRef<number>(0);
+  const audioDurationRef = useRef<number>(0);
 
   // Derived State
   const timeSinceLastGen = Date.now() - lastGenTime;
@@ -104,6 +114,11 @@ const App: React.FC = () => {
     if (savedHistory) setHistory(JSON.parse(savedHistory));
     if (savedStories) setStories(JSON.parse(savedStories));
     if (savedTime) setLastGenTime(parseInt(savedTime, 10));
+
+    // Cleanup audio on unmount
+    return () => {
+      stopAllAudio();
+    };
   }, []);
 
   // Persist data when changed
@@ -207,6 +222,7 @@ const App: React.FC = () => {
 
   const handleDeleteStory = (id: string) => {
     setStories(prev => prev.filter(story => story.id !== id));
+    if (activeAudioId === id) stopAllAudio();
   };
 
   const handleWordClick = async (word: string, context: string, event: React.MouseEvent) => {
@@ -252,108 +268,187 @@ const App: React.FC = () => {
     return audioBuffer;
   };
 
-  /**
-   * PLAY AUDIO FUNCTION
-   * Strategy:
-   * 1. If text is short (< 150 chars), use Native Browser TTS (Fast, No Latency).
-   * 2. If text is long (stories), use Gemini AI (Better quality, supports PCM).
-   * 3. Always unlock AudioContext immediately on user interaction for Mobile.
-   */
-  const playAudio = async (text: string, forceGemini: boolean = false) => {
-    if (isPlayingAudio) return;
+  // AUDIO CONTROLLER
+  const stopAllAudio = () => {
+    // Stop Native TTS
+    window.speechSynthesis.cancel();
     
-    // Determine gender based on selection for Native TTS best effort
-    const isMale = ['Fenrir', 'Puck', 'Charon'].includes(selectedVoice);
-
-    // STRATEGY 1: NATIVE TTS for short text (Fastest for mobile/vocab)
-    if (!forceGemini && text.length < 150) {
-       try {
-         // Cancel any ongoing speech
-         window.speechSynthesis.cancel();
-         
-         const utterance = new SpeechSynthesisUtterance(text);
-         utterance.lang = 'en-US';
-         utterance.rate = Math.max(0.8, Math.min(playbackSpeed, 1.2)); // Native TTS speed range is different
-         utterance.volume = 1;
-         
-         // Try to pick a voice matching the gender preference
-         const voices = window.speechSynthesis.getVoices();
-         const preferredVoice = voices.find(v => {
-           const name = v.name.toLowerCase();
-           const lang = v.lang;
-           if (!lang.startsWith('en')) return false;
-           
-           if (isMale) return name.includes('male') || name.includes('david') || name.includes('james');
-           return name.includes('female') || name.includes('zira') || name.includes('samantha');
-         });
-
-         if (preferredVoice) {
-           utterance.voice = preferredVoice;
-         }
-         
-         utterance.onstart = () => setIsPlayingAudio(true);
-         utterance.onend = () => setIsPlayingAudio(false);
-         utterance.onerror = () => setIsPlayingAudio(false);
-         
-         window.speechSynthesis.speak(utterance);
-         return;
-       } catch (e) {
-         console.warn("Native TTS failed, falling back to Gemini", e);
-         // Fallback to Gemini if native fails
-       }
+    // Stop Gemini Audio
+    if (audioSourceRef.current) {
+        try { audioSourceRef.current.stop(); } catch(e) {}
+        audioSourceRef.current = null;
+    }
+    if (audioContextRef.current) {
+        audioContextRef.current.suspend();
+    }
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
 
-    // STRATEGY 2: GEMINI AI for long text or fallback
-    setIsPlayingAudio(true);
+    setActiveAudioId(null);
+    setIsPaused(false);
+    setIsLoadingAudio(false);
+    setAudioProgress(0);
+  };
 
-    // CRITICAL FOR MOBILE: Create/Resume AudioContext immediately within the click handler
+  /**
+   * Universal Audio Toggle Handler
+   * @param id Unique identifier for the audio source
+   * @param text The text content to read
+   * @param forceGemini If true, prioritize Gemini API over Native TTS
+   * @param isDialogue If true, use multi-speaker mode
+   */
+  const handleAudioToggle = async (id: string, text: string, forceGemini: boolean = false, isDialogue: boolean = false) => {
+    // 1. If clicking the SAME active item
+    if (activeAudioId === id) {
+        if (isPaused) {
+            // RESUME
+            if (forceGemini || text.length >= 150) {
+                audioContextRef.current?.resume();
+            } else {
+                window.speechSynthesis.resume();
+            }
+            setIsPaused(false);
+        } else {
+            // PAUSE
+            if (forceGemini || text.length >= 150) {
+                audioContextRef.current?.suspend();
+            } else {
+                window.speechSynthesis.pause();
+            }
+            setIsPaused(true);
+        }
+        return;
+    }
+
+    // 2. If clicking a NEW item
+    stopAllAudio(); // Clear previous
+    setActiveAudioId(id);
+    setIsLoadingAudio(true);
+    setAudioProgress(0);
+
+    // Initialize/Resume Audio Context (Required for mobile)
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!audioContextRef.current) {
         audioContextRef.current = new AudioContextClass();
     }
-    const ctx = audioContextRef.current;
-    
+    if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+    }
+
+    // Determine strategy
+    const isMale = ['Fenrir', 'Puck', 'Charon'].includes(selectedVoice);
+
+    // STRATEGY 1: NATIVE TTS for short text (Fastest)
+    if (!forceGemini && text.length < 150) {
+        try {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            utterance.rate = Math.max(0.8, Math.min(playbackSpeed, 1.2)); 
+            utterance.volume = 1;
+            
+            const voices = window.speechSynthesis.getVoices();
+            const preferredVoice = voices.find(v => {
+              const name = v.name.toLowerCase();
+              const lang = v.lang;
+              if (!lang.startsWith('en')) return false;
+              
+              if (isMale) return name.includes('male') || name.includes('david');
+              return name.includes('female') || name.includes('zira');
+            });
+
+            if (preferredVoice) utterance.voice = preferredVoice;
+            
+            utterance.onend = () => { setActiveAudioId(null); setIsLoadingAudio(false); setAudioProgress(0); };
+            utterance.onerror = () => { setActiveAudioId(null); setIsLoadingAudio(false); setAudioProgress(0); };
+            
+            setIsLoadingAudio(false); 
+            window.speechSynthesis.speak(utterance);
+        } catch (e) {
+            console.warn("Native TTS failed, falling back to Gemini");
+            // Fallthrough to Gemini
+        }
+        return;
+    }
+
+    // STRATEGY 2: GEMINI AI
     try {
-      // Always resume context (Chrome/iOS policy requires this after user gesture)
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
-      }
+        // Pass isDialogue flag to service
+        const base64Audio = await generateSpeech(text, selectedVoice, isDialogue);
+        if (!base64Audio) throw new Error("Audio generation failed");
 
-      // Pass the selected voice name to the service
-      const base64Audio = await generateSpeech(text, selectedVoice);
-      if (!base64Audio) throw new Error("Audio generation failed");
+        // Convert Base64 to Uint8Array
+        const binaryString = atob(base64Audio);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
 
-      // Convert Base64 to Uint8Array
-      const binaryString = atob(base64Audio);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+        const ctx = audioContextRef.current!;
+        const audioBuffer = decodePCMData(bytes, ctx);
+        
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.playbackRate.value = playbackSpeed;
+        source.connect(ctx.destination);
+        
+        audioSourceRef.current = source;
+        audioStartTimeRef.current = ctx.currentTime;
+        audioDurationRef.current = audioBuffer.duration / playbackSpeed;
 
-      // Decode PCM Data
-      const audioBuffer = decodePCMData(bytes, ctx);
-      
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.playbackRate.value = playbackSpeed; // Apply playback speed
-      source.connect(ctx.destination);
-      
-      source.onended = () => {
-        setIsPlayingAudio(false);
-      };
-      
-      source.start();
+        // Progress Tracking Loop for Visual Karaoke
+        const trackProgress = () => {
+          if (!isPaused && audioContextRef.current?.state === 'running') {
+            const elapsedTime = audioContextRef.current.currentTime - audioStartTimeRef.current;
+            const progress = Math.min(Math.max(elapsedTime / audioDurationRef.current, 0), 1);
+            setAudioProgress(progress);
+            
+            if (progress < 1) {
+              rafRef.current = requestAnimationFrame(trackProgress);
+            }
+          } else if (isPaused) {
+             // If paused, keep loop alive but don't update progress logic same way or just stop
+             rafRef.current = requestAnimationFrame(trackProgress);
+          }
+        };
+
+        source.onended = () => {
+            setActiveAudioId(null);
+            setIsPaused(false);
+            setAudioProgress(0);
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        };
+        
+        source.start();
+        rafRef.current = requestAnimationFrame(trackProgress);
+        setIsLoadingAudio(false);
 
     } catch (error) {
-      console.error("Audio playback failed", error);
-      setIsPlayingAudio(false);
-      alert("Không thể phát âm thanh. Vui lòng kiểm tra kết nối mạng.");
+        console.error("Audio playback failed", error);
+        stopAllAudio();
+        alert("Không thể phát âm thanh. Vui lòng kiểm tra kết nối mạng.");
     }
   };
 
-  // Helper component to render clickable text
-  const InteractiveStoryText = ({ content }: { content: string }) => {
+  // Helper component to render clickable text with KARAOKE highlight
+  const InteractiveStoryText = ({ content, storyId }: { content: string, storyId: string }) => {
+    // Determine active state for this story
+    const isActive = activeAudioId === storyId;
+    
+    // We need to split text into words but preserve structure.
+    // For simplicity of highlighting estimation:
+    // 1. Calculate total estimated word count
+    // 2. Based on audioProgress (0-1), find which word index we are at.
+    
+    // Split by spaces to count words for progress estimation
+    const rawWords = content.replace(/<\/?[^>]+(>|$)/g, "").split(/\s+/).filter(w => w.length > 0);
+    const totalWords = rawWords.length;
+    const currentWordIndex = isActive ? Math.floor(audioProgress * totalWords) : -1;
+
+    let globalWordCounter = 0;
+
     const parts = content.split(/(<b>.*?<\/b>)/g);
 
     return (
@@ -361,11 +456,18 @@ const App: React.FC = () => {
         {parts.map((part, index) => {
           if (part.startsWith('<b>') && part.endsWith('</b>')) {
             const innerText = part.replace(/<\/?b>/g, '');
+            // Highlight check
+            const isHighlighted = isActive && globalWordCounter === currentWordIndex;
+            globalWordCounter++; // Increment count
+
             return (
               <span 
                 key={index} 
                 onClick={(e) => handleWordClick(innerText, content, e)}
-                className="font-extrabold text-amber-300 cursor-pointer bg-amber-500/20 hover:bg-amber-500/40 px-1.5 py-0.5 rounded transition-all shadow-[0_0_12px_rgba(245,158,11,0.3)] border border-amber-500/30 mx-0.5"
+                className={`font-extrabold cursor-pointer px-1.5 py-0.5 rounded transition-all shadow-[0_0_12px_rgba(245,158,11,0.3)] border mx-0.5
+                    ${isHighlighted 
+                        ? 'bg-yellow-400 text-black scale-110 border-yellow-500 z-10' 
+                        : 'text-amber-300 bg-amber-500/20 hover:bg-amber-500/40 border-amber-500/30'}`}
               >
                 {innerText}
               </span>
@@ -375,11 +477,18 @@ const App: React.FC = () => {
               <span key={index}>
                 {part.split(/(\s+)/).map((word, wIndex) => {
                   if (word.trim().length === 0) return word;
+                  
+                  const isHighlighted = isActive && globalWordCounter === currentWordIndex;
+                  globalWordCounter++;
+
                   return (
                     <span 
                       key={`${index}-${wIndex}`}
                       onClick={(e) => handleWordClick(word, content, e)}
-                      className="cursor-pointer hover:underline hover:text-indigo-200 transition-colors"
+                      className={`cursor-pointer transition-colors px-0.5 rounded
+                        ${isHighlighted 
+                            ? 'bg-yellow-400/80 text-black font-bold' 
+                            : 'hover:underline hover:text-indigo-200'}`}
                     >
                       {word}
                     </span>
@@ -514,19 +623,24 @@ const App: React.FC = () => {
               {translatedResult ? (
                 <div className="w-full text-center animate-fade-in flex flex-col items-center">
                   <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-3 mb-3 flex-wrap">
-                    <p className="text-xl md:text-3xl font-bold text-indigo-900 break-words flex items-center gap-2">
-                      {translatedResult.english}
-                      <div className="flex items-center gap-2 ml-2">
-                         <button 
-                          onClick={() => playAudio(translatedResult.english)}
-                          disabled={isPlayingAudio}
-                          className={`p-2 rounded-full transition-all shadow-sm ${isPlayingAudio ? 'bg-indigo-100 text-indigo-400' : 'bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-100'}`}
-                          title="Nghe phát âm"
-                        >
-                           <SpeakerWaveIcon className={`w-5 h-5 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
-                        </button>
-                      </div>
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xl md:text-3xl font-bold text-indigo-900 break-words">
+                        {translatedResult.english}
+                      </p>
+                      <button 
+                        onClick={() => handleAudioToggle('translate_res', translatedResult.english)}
+                        disabled={isLoadingAudio && activeAudioId === 'translate_res'}
+                        className={`p-2 rounded-full transition-all shadow-sm ${activeAudioId === 'translate_res' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-100'}`}
+                        title={activeAudioId === 'translate_res' && !isPaused ? "Tạm dừng" : "Nghe phát âm"}
+                      >
+                         {activeAudioId === 'translate_res' && !isPaused ? (
+                           <PauseIcon className="w-5 h-5" />
+                         ) : (
+                           <SpeakerWaveIcon className="w-5 h-5" />
+                         )}
+                      </button>
+                    </div>
+
                     {translatedResult.phonetic && (
                       <span className="text-sm font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded border border-gray-200">
                         {translatedResult.phonetic}
@@ -580,8 +694,8 @@ const App: React.FC = () => {
                     {group.items.map((item) => (
                       <div 
                         key={item.id} 
-                        onClick={() => playAudio(item.english)}
-                        className="group relative flex flex-col bg-gray-50 hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 px-4 py-2 rounded-xl transition-all min-w-[140px] max-w-[240px] cursor-pointer active:scale-95"
+                        onClick={() => handleAudioToggle(item.id, item.english)}
+                        className={`group relative flex flex-col bg-gray-50 hover:bg-indigo-50 border px-4 py-2 rounded-xl transition-all min-w-[140px] max-w-[240px] cursor-pointer active:scale-95 ${activeAudioId === item.id ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200'}`}
                         title="Nhấn để nghe phát âm"
                       >
                         <button 
@@ -594,7 +708,11 @@ const App: React.FC = () => {
                         <div className="flex justify-between items-start mb-1">
                           <span className="font-semibold text-indigo-700 truncate mr-2 flex items-center gap-1">
                             {item.english}
-                            <SpeakerWaveIcon className="w-3 h-3 text-indigo-300 opacity-0 group-hover:opacity-100" />
+                            {activeAudioId === item.id && !isPaused ? (
+                               <PauseIcon className="w-3 h-3 text-indigo-500" />
+                            ) : (
+                               <SpeakerWaveIcon className="w-3 h-3 text-indigo-300 opacity-0 group-hover:opacity-100" />
+                            )}
                           </span>
                           {item.partOfSpeech && (
                             <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-100 px-1.5 py-0.5 rounded">
@@ -725,13 +843,22 @@ const App: React.FC = () => {
                             <div className="h-4 w-[1px] bg-white/20"></div>
                             <SpeedSelector theme="dark" />
                             <div className="h-4 w-[1px] bg-white/20"></div>
+                            
                             <button 
-                              onClick={() => playAudio(story.content, true)}
-                              disabled={isPlayingAudio}
-                              className={`text-xs p-1.5 rounded transition-colors ${isPlayingAudio ? 'bg-white/20 text-green-300' : 'hover:bg-white/20 text-white'}`}
-                              title="Nghe câu chuyện (Gemini Voice)"
+                              onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
+                              disabled={isLoadingAudio && activeAudioId === story.id}
+                              className={`text-xs p-1.5 rounded transition-colors flex items-center gap-1 ${activeAudioId === story.id ? 'bg-white text-indigo-900 font-bold' : 'hover:bg-white/20 text-white'}`}
+                              title={activeAudioId === story.id && !isPaused ? "Tạm dừng đọc" : "Nghe câu chuyện (Gemini Voice)"}
                             >
-                              <SpeakerWaveIcon className={`w-4 h-4 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+                              {activeAudioId === story.id ? (
+                                <>
+                                  {isLoadingAudio ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : 
+                                    (isPaused ? <SpeakerWaveIcon className="w-4 h-4" /> : <PauseIcon className="w-4 h-4" />)
+                                  }
+                                </>
+                              ) : (
+                                <SpeakerWaveIcon className="w-4 h-4" />
+                              )}
                             </button>
                           </div>
 
@@ -755,7 +882,7 @@ const App: React.FC = () => {
                       
                       {/* English Content */}
                       <div className="prose prose-invert prose-lg max-w-none text-indigo-50 mb-6">
-                         <InteractiveStoryText content={story.content} />
+                         <InteractiveStoryText content={story.content} storyId={story.id} />
                       </div>
 
                       {/* Vocabulary list used */}
@@ -858,11 +985,11 @@ const App: React.FC = () => {
                   {selectedWord.word}
                   {selectedWord.phonetic && <span className="text-sm font-normal text-gray-500 font-mono bg-gray-100 px-2 py-0.5 rounded">{selectedWord.phonetic}</span>}
                   <button 
-                    onClick={() => playAudio(selectedWord.word)}
-                    disabled={isPlayingAudio}
+                    onClick={() => handleAudioToggle('modal_word', selectedWord.word)}
+                    disabled={isLoadingAudio && activeAudioId === 'modal_word'}
                     className="p-1 text-indigo-500 hover:text-indigo-700"
                   >
-                    <SpeakerWaveIcon className={`w-4 h-4 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+                     {activeAudioId === 'modal_word' && !isPaused ? <PauseIcon className="w-4 h-4" /> : <SpeakerWaveIcon className="w-4 h-4" />}
                   </button>
                 </h3>
                 <span className="text-xs font-semibold text-indigo-500 uppercase tracking-wide">{selectedWord.type}</span>

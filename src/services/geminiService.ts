@@ -183,21 +183,57 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
   }
 };
 
-export const generateSpeech = async (text: string, voice: string = 'Kore'): Promise<string | undefined> => {
+export const generateSpeech = async (text: string, voice: string = 'Kore', isDialogue: boolean = false): Promise<string | undefined> => {
   try {
     const ai = getAIClient();
     const cleanText = text.replace(/<\/?[^>]+(>|$)/g, ""); // Remove HTML tags like <b>
     
+    let speechConfig: any = {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: voice },
+        },
+    };
+
+    // If it's a dialogue, try to parse speakers and assign multi-speaker config
+    if (isDialogue) {
+        // Regex to find "Name:" pattern at the start of lines
+        const speakerRegex = /^([A-Za-z]+):/gm;
+        const matches = [...cleanText.matchAll(speakerRegex)];
+        const uniqueSpeakers = [...new Set(matches.map(m => m[1]))];
+
+        // Only use multi-speaker if we detected exactly 2 or more speakers
+        if (uniqueSpeakers.length >= 2) {
+            const speaker1 = uniqueSpeakers[0];
+            const speaker2 = uniqueSpeakers[1];
+
+            // Determine secondary voice based on primary voice to ensure contrast (Male vs Female)
+            // Available: Kore (F), Fenrir (M), Puck (M), Charon (M)
+            const isPrimaryMale = ['Fenrir', 'Puck', 'Charon'].includes(voice);
+            const secondaryVoice = isPrimaryMale ? 'Kore' : 'Fenrir';
+
+            speechConfig = {
+                multiSpeakerVoiceConfig: {
+                    speakerVoiceConfigs: [
+                        {
+                            speaker: speaker1,
+                            voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } }
+                        },
+                        {
+                            speaker: speaker2,
+                            voiceConfig: { prebuiltVoiceConfig: { voiceName: secondaryVoice } }
+                        }
+                    ]
+                }
+            };
+        }
+    }
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text: cleanText }] }],
       config: {
         responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
-          },
-        },
+        speechConfig: speechConfig,
       },
     });
 
