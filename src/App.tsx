@@ -180,10 +180,14 @@ const App: React.FC = () => {
     }
 
     setIsLoadingStory(true);
+    const startTime = Date.now();
     try {
       const wordList = targetWords.map(w => w.english);
       // Pass the storyType to the service
       const result = await generateStoryFromWords(wordList, storyTheme, storyType);
+      
+      const endTime = Date.now();
+      const duration = endTime - startTime;
 
       const newStory: GeneratedStory = {
         id: Date.now().toString(),
@@ -193,6 +197,7 @@ const App: React.FC = () => {
         timestamp: Date.now(),
         vocabularyUsed: wordList,
         theme: (storyType === 'dialogue' ? '💬 Hội thoại - ' : '📖 Truyện ngắn - ') + (storyTheme || 'General'),
+        generationTimeMs: duration
       };
 
       setStories(prev => [newStory, ...prev]);
@@ -836,6 +841,11 @@ const App: React.FC = () => {
                             <span className="text-xs text-indigo-300">
                                 {new Date(story.timestamp).toLocaleDateString()}
                             </span>
+                            {story.generationTimeMs && (
+                              <span className="text-xs text-indigo-300 flex items-center gap-1 border-l border-white/20 pl-2" title="Thời gian tạo">
+                                ⚡ {(story.generationTimeMs / 1000).toFixed(1)}s
+                              </span>
+                            )}
                         </div>
                         <div className="flex items-center gap-2">
                           <div className="flex items-center gap-2 bg-white/10 rounded-lg px-2 py-1">

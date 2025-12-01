@@ -24,6 +24,7 @@ export interface GeneratedStory {
   vocabularyUsed: string[];
   theme: string;
   grammarPoints?: GrammarPoint[]; // Optional for backward compatibility
+  generationTimeMs?: number; // Time taken to generate in milliseconds
 }
 
 export interface WordDefinition {
