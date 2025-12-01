@@ -43,7 +43,8 @@ const App: React.FC = () => {
   // State
   const [inputText, setInputText] = useState('');
   const [translatedResult, setTranslatedResult] = useState<TranslationResponse | null>(null);
-  const [direction, setDirection] = useState<'vi_en' | 'en_vi'>('vi_en');
+  // Default direction set to 'en_vi' (English to Vietnamese)
+  const [direction, setDirection] = useState<'vi_en' | 'en_vi'>('en_vi');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [stories, setStories] = useState<GeneratedStory[]>([]);
   const [lastGenTime, setLastGenTime] = useState<number>(0);
