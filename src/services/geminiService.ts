@@ -185,79 +185,85 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
 };
 
 export const generateSpeech = async (text: string, voice: string = 'Kore', isDialogue: boolean = false): Promise<string | undefined> => {
-  try {
-    const ai = getAIClient();
-    
-    // 1. Thoroughly clean the text
-    // Remove HTML tags (<b>), Markdown bold (**), and other artifacts
-    // Note: Do NOT remove colons (:) as they are needed for speaker detection
-    const cleanText = text
-      .replace(/<\/?[^>]+(>|$)/g, "") // Remove HTML tags
-      .replace(/\*\*/g, "")           // Remove Markdown bold
-      .replace(/\*/g, "")             // Remove asterisks
-      .replace(/#/g, "")              // Remove hashes
-      .trim();
+  const ai = getAIClient();
+  
+  // 1. Thoroughly clean the text while preserving structure for speaker detection
+  // Remove HTML tags (<b>), Markdown bold (**), and other artifacts
+  // Note: Do NOT remove colons (:) as they are needed for speaker detection
+  const cleanText = text
+    .replace(/<\/?[^>]+(>|$)/g, "") // Remove HTML tags
+    .replace(/\*\*/g, "")           // Remove Markdown bold
+    .replace(/\*/g, "")             // Remove asterisks
+    .replace(/#/g, "")              // Remove hashes
+    .trim();
 
-    let speechConfig: any = {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: voice },
-        },
-    };
+  // ATTEMPT 1: Multi-speaker (if applicable)
+  if (isDialogue) {
+    try {
+      // Improved regex to capture names before colons, handling spaces and Unicode
+      const speakerRegex = /^\s*([^\:\n]+)\s*:/gm;
+      const matches = [...cleanText.matchAll(speakerRegex)];
+      const uniqueSpeakers = [...new Set(matches.map(m => m[1].trim()))];
 
-    // If it's a dialogue, try to parse speakers and assign multi-speaker config
-    if (isDialogue) {
-        // IMPROVED REGEX: 
-        // Handles: "Tom:", "**Tom**:", "Mr. Bean:", "Hùng:", " Speaker 1 :"
-        // ^\s*[\*]* : Start of line, optional space, optional asterisks
-        // ([^\:\*\n]+) : Capture the name (anything except colon, asterisk, or newline)
-        // [\*]*\s*: : Optional asterisks, optional space, then Colon
-        const speakerRegex = /^\s*[\*]*\s*([^\:\*\n]+)\s*[\*]*\s*:/gm;
-        
-        const matches = [...cleanText.matchAll(speakerRegex)];
-        // Extract names and trim whitespace
-        const uniqueSpeakers = [...new Set(matches.map(m => m[1].trim()))];
+      // Only proceed if exactly 2 speakers are clearly identified to avoid API errors
+      if (uniqueSpeakers.length >= 2) {
+        console.log("Attempting Multi-speaker TTS with:", uniqueSpeakers);
+        const speaker1 = uniqueSpeakers[0];
+        const speaker2 = uniqueSpeakers[1];
 
-        console.log("Detected Speakers:", uniqueSpeakers);
+        const isPrimaryMale = ['Fenrir', 'Puck', 'Charon'].includes(voice);
+        const secondaryVoice = isPrimaryMale ? 'Kore' : 'Fenrir';
 
-        // Only use multi-speaker if we detected exactly 2 or more speakers
-        if (uniqueSpeakers.length >= 2) {
-            const speaker1 = uniqueSpeakers[0];
-            const speaker2 = uniqueSpeakers[1];
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash-preview-tts",
+          contents: [{ parts: [{ text: cleanText }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              multiSpeakerVoiceConfig: {
+                speakerVoiceConfigs: [
+                  {
+                    speaker: speaker1,
+                    voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } }
+                  },
+                  {
+                    speaker: speaker2,
+                    voiceConfig: { prebuiltVoiceConfig: { voiceName: secondaryVoice } }
+                  }
+                ]
+              }
+            },
+          },
+        });
 
-            // Determine secondary voice based on primary voice to ensure contrast (Male vs Female)
-            // Available: Kore (F), Fenrir (M), Puck (M), Charon (M)
-            const isPrimaryMale = ['Fenrir', 'Puck', 'Charon'].includes(voice);
-            const secondaryVoice = isPrimaryMale ? 'Kore' : 'Fenrir';
-
-            speechConfig = {
-                multiSpeakerVoiceConfig: {
-                    speakerVoiceConfigs: [
-                        {
-                            speaker: speaker1,
-                            voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } }
-                        },
-                        {
-                            speaker: speaker2,
-                            voiceConfig: { prebuiltVoiceConfig: { voiceName: secondaryVoice } }
-                        }
-                    ]
-                }
-            };
-        }
+        const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (audioData) return audioData;
+      }
+    } catch (error) {
+      console.warn("Multi-speaker TTS failed, falling back to single speaker...", error);
+      // Do not return here; let it fall through to the single speaker logic
     }
+  }
 
+  // ATTEMPT 2: Fallback to Single Speaker (Guaranteed to work)
+  try {
+    console.log("Using Single-speaker TTS Fallback");
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts", // Correct model for TTS
+      model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text: cleanText }] }],
       config: {
         responseModalities: [Modality.AUDIO],
-        speechConfig: speechConfig,
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: voice },
+          },
+        },
       },
     });
 
     return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   } catch (error) {
-    console.error("TTS Error:", error);
+    console.error("TTS Fatal Error:", error);
     return undefined;
   }
 };
