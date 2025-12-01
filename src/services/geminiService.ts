@@ -9,6 +9,14 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
+// Common safety settings to prevent blocking of educational content
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
+
 export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' = 'vi_en'): Promise<TranslationResponse> => {
   try {
     const ai = getAIClient();
@@ -54,6 +62,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        safetySettings: safetySettings,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -134,6 +143,7 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        safetySettings: safetySettings, // CRITICAL: Prevent blocking of story content
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -164,8 +174,8 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
     console.error("Gemini Story Generation Error:", error);
     // Fallback in case JSON parsing fails, though rare with correct config
     return { 
-      english: "Could not generate content.", 
-      vietnamese: "Không thể tạo nội dung.",
+      english: "Could not generate content. Please try again with different keywords.", 
+      vietnamese: "Không thể tạo nội dung. Vui lòng thử lại.",
       grammarPoints: []
     };
   }
@@ -191,6 +201,7 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
       contents: prompt,
       config: {
         responseMimeType: "application/json",
+        safetySettings: safetySettings,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -222,14 +233,6 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
     .replace(/\*/g, "")             // Remove asterisks
     .replace(/#/g, "")              // Remove hashes
     .trim();
-
-  // Safety settings to prevent blocking of mild content (stories/dialogues)
-  const safetySettings = [
-    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-  ];
 
   // ATTEMPT 1: Multi-speaker (if applicable)
   if (isDialogue) {
