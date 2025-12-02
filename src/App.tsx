@@ -18,7 +18,9 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   ChevronDownIcon,
-  PencilSquareIcon
+  PencilSquareIcon,
+  TrophyIcon,
+  BoltIcon
 } from './components/Icons';
 
 // Constants
@@ -81,7 +83,11 @@ const App: React.FC = () => {
   // Session Timer State
   const [currentTime, setCurrentTime] = useState(new Date());
   const [onlineSeconds, setOnlineSeconds] = useState(0);
+  const [showCongratulation, setShowCongratulation] = useState(false);
   
+  // Energy System State
+  const [energy, setEnergy] = useState(100);
+
   // Suggestion State
   const [suggestions, setSuggestions] = useState<WordSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -105,6 +111,9 @@ const App: React.FC = () => {
   const [audioProgress, setAudioProgress] = useState<number>(0);
   const [highlightedWordIndex, setHighlightedWordIndex] = useState<number>(-1);
   
+  // Audio Cache
+  const audioCacheRef = useRef<Record<string, string>>({}); // Key: id-voiceId, Value: base64 string
+
   // Cloze Test State (Fill in the blank)
   const [clozeStoryId, setClozeStoryId] = useState<string | null>(null);
   const [clozeHiddenIndices, setClozeHiddenIndices] = useState<number[]>([]);
@@ -188,7 +197,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const timer = setInterval(() => {
         setCurrentTime(new Date());
-        setOnlineSeconds(prev => prev + 1);
+        setOnlineSeconds(prev => {
+            const newValue = prev + 1;
+            if (newValue === 600) { // 10 minutes
+                setShowCongratulation(true);
+            }
+            return newValue;
+        });
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -310,6 +325,7 @@ const App: React.FC = () => {
     
     try {
       const result = await translateText(text, direction);
+      setEnergy(prev => Math.max(0, prev - 2)); // Consume energy
       
       let englishText = "";
       let vietnameseText = "";
@@ -361,12 +377,19 @@ const App: React.FC = () => {
       return;
     }
 
+    if (energy < 15) {
+        alert("Bạn không đủ năng lượng để tạo truyện mới. Hãy nghỉ ngơi một chút!");
+        return;
+    }
+
     setIsLoadingStory(true);
     const startTime = Date.now();
     try {
       const wordList = targetWords.map(w => w.english);
       const result = await generateStoryFromWords(wordList, storyTheme, storyType);
       
+      setEnergy(prev => Math.max(0, prev - 15)); // Consume energy
+
       const endTime = Date.now();
       const duration = endTime - startTime;
 
@@ -389,7 +412,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoadingStory(false);
     }
-  }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen, storyType]);
+  }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen, storyType, energy]);
 
   const handleClearHistory = () => {
     if (window.confirm("Xóa toàn bộ lịch sử?")) {
@@ -636,7 +659,24 @@ const App: React.FC = () => {
              await audioContextRef.current.resume();
         }
 
-        const audioData = await generateSpeech(text, selectedVoice, isDialogue);
+        // Check Cache first
+        const cacheKey = `${id}-${selectedVoice}`;
+        let audioData = audioCacheRef.current[cacheKey];
+
+        if (!audioData) {
+             if (energy < 10) {
+                 alert("Không đủ năng lượng để tạo giọng đọc AI mới. Chuyển sang giọng máy.");
+                 playNativeTTS(text);
+                 return;
+             }
+             // Fetch from API
+             const fetchedData = await generateSpeech(text, selectedVoice, isDialogue);
+             if (fetchedData) {
+                 audioData = fetchedData;
+                 audioCacheRef.current[cacheKey] = audioData; // Store in cache
+                 setEnergy(prev => Math.max(0, prev - 10)); // Deduct energy only for new generation
+             }
+        }
         
         if (!audioData) {
             console.warn("Gemini Audio failed, falling back to Native TTS");
@@ -710,6 +750,7 @@ const App: React.FC = () => {
     try {
         const questions = await generateQuizFromWords(selectedWords);
         setQuizQuestions(questions);
+        setEnergy(prev => Math.max(0, prev - 5)); // Deduct energy
     } catch (error) {
         alert("Không thể tạo bài kiểm tra. Vui lòng thử lại.");
         setIsQuizMode(false);
@@ -757,19 +798,26 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
+              {/* Energy Bar */}
+              <div className="flex items-center gap-2">
+                  <BoltIcon className={`w-5 h-5 ${energy < 20 ? 'text-red-500 animate-pulse' : 'text-yellow-500'}`} />
+                  <div className="w-20 md:w-32 h-2.5 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
+                      <div 
+                        className={`h-full transition-all duration-500 ${energy < 20 ? 'bg-red-500' : 'bg-gradient-to-r from-yellow-400 to-orange-500'}`}
+                        style={{ width: `${energy}%` }}
+                      ></div>
+                  </div>
+                  <span className="text-xs font-bold text-gray-600 hidden md:inline">{Math.round(energy)}%</span>
+              </div>
+
               {/* Session Timeline for PC */}
-              <div className="hidden md:flex flex-col items-end text-xs text-gray-500 border-r border-gray-100 pr-4 mr-2">
+              <div className="hidden md:flex flex-col items-end text-xs text-gray-500 border-l border-gray-100 pl-4 ml-2">
                   <span className="font-medium text-gray-700">
                       {currentTime.toLocaleTimeString('vi-VN')}
                   </span>
                   <span className="flex items-center gap-1">
                       Online: {formatDuration(onlineSeconds)}
                   </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs md:text-sm text-gray-500 bg-gray-50 px-2 py-1 rounded-full border border-gray-200">
-                <ClockIcon className="w-4 h-4" />
-                <span>{Math.round(progressPercent)}% năng lượng</span>
               </div>
           </div>
         </div>
@@ -1294,9 +1342,9 @@ const App: React.FC = () => {
 
                                     {/* Audio Progress Bar */}
                                     {activeAudioId === story.id && (
-                                        <div className="h-1 w-full bg-gray-100">
+                                        <div className="h-1.5 w-full bg-gray-100 overflow-hidden">
                                             <div 
-                                                className="h-full bg-purple-500 transition-all duration-300 ease-linear"
+                                                className="h-full bg-gradient-to-r from-purple-400 to-purple-600 transition-all duration-300 ease-linear"
                                                 style={{ width: `${audioProgress * 100}%` }}
                                             ></div>
                                         </div>
@@ -1507,148 +1555,162 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Congratulation Popup */}
+      {showCongratulation && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl animate-bounce-in">
+                <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-yellow-100/50 to-transparent pointer-events-none"></div>
+                <div className="bg-yellow-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 relative z-10 animate-pulse">
+                    <TrophyIcon className="w-12 h-12 text-yellow-600" />
+                </div>
+                <h3 className="text-2xl font-bold text-gray-800 mb-2">Chúc mừng! 🎉</h3>
+                <p className="text-gray-600 mb-6">Bạn đã học chăm chỉ được <span className="font-bold text-indigo-600">10 phút</span> rồi. Hãy cố gắng giữ vững phong độ nhé!</p>
+                <button 
+                    onClick={() => setShowCongratulation(false)}
+                    className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg hover:shadow-indigo-200"
+                >
+                    Tuyệt vời!
+                </button>
+            </div>
+        </div>
+      )}
     </div>
   );
 };
 
 // --- New Component: Date Accordion ---
 const DateAccordion: React.FC<{ title: string; count: number; children: React.ReactNode; defaultOpen?: boolean }> = ({ title, count, children, defaultOpen = false }) => {
-    const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
-    return (
-        <div className="border border-gray-100 rounded-2xl overflow-hidden bg-white mb-4 shadow-sm hover:shadow-md transition-all">
-            <button 
-                onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex justify-between items-center p-5 bg-gray-50/50 hover:bg-gray-50 transition-colors text-left group"
-            >
-                <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg transition-colors ${isOpen ? 'bg-indigo-100 text-indigo-600' : 'bg-white text-gray-400 border border-gray-200'}`}>
-                        <ClockIcon className="w-5 h-5" />
-                    </div>
-                    <div>
-                        <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wide group-hover:text-indigo-600 transition-colors">{title}</h3>
-                        <p className="text-xs text-gray-400 mt-0.5 font-medium">{count} mục</p>
-                    </div>
-                </div>
-                <div className={`p-2 rounded-full hover:bg-white transition-all duration-300 ${isOpen ? 'rotate-180 text-indigo-600 bg-white shadow-sm' : 'text-gray-400'}`}>
-                    <ChevronDownIcon className="w-5 h-5" />
-                </div>
-            </button>
-            
-            <div className={`transition-all duration-300 ease-in-out ${isOpen ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}>
-                <div className="p-4 md:p-6 bg-white border-t border-gray-100">
-                    {children}
-                </div>
-            </div>
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm transition-all hover:border-indigo-200">
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="font-bold text-gray-700">{title}</span>
+          <span className="bg-white border border-gray-200 text-gray-500 text-xs px-2 py-0.5 rounded-full font-medium">{count} items</span>
         </div>
-    );
+        <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className="p-4 border-t border-gray-100">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
 };
 
-// Helper component for interactive text highlighting
-const InteractiveStoryText: React.FC<{ 
-    htmlContent: string; 
-    onWordClick: (word: string) => void;
-    highlightIndex: number;
-    isClozeMode?: boolean;
-    hiddenIndices?: number[];
-    userInputs?: Record<number, string>;
-    onInputChange?: (index: number, value: string) => void;
-    isSubmitted?: boolean;
-}> = React.memo(({ 
-    htmlContent, 
-    onWordClick, 
-    highlightIndex, 
-    isClozeMode = false, 
-    hiddenIndices = [], 
-    userInputs = {}, 
-    onInputChange, 
-    isSubmitted = false 
-}) => {
-    const createMarkup = () => {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = htmlContent;
-        
-        let wordCounter = 0;
-
-        const processNode = (node: Node): React.ReactNode => {
-            if (node.nodeType === Node.TEXT_NODE) {
-                const text = node.textContent || "";
-                const parts = text.split(/(\s+)/);
-                
-                return parts.map((part, i) => {
-                    if (part.trim().length === 0) return part; // Return spaces
-                    
-                    const currentIndex = wordCounter++;
-                    const isHighlighted = currentIndex === highlightIndex;
-                    
-                    // Cloze Test Logic
-                    if (isClozeMode && hiddenIndices.includes(currentIndex)) {
-                        const cleanWord = part.replace(/[.,!?;:()"]/g, "");
-                        const userInput = userInputs[currentIndex] || "";
-                        const isCorrect = userInput.toLowerCase().trim() === cleanWord.toLowerCase().trim();
-
-                        return (
-                            <span key={`cloze-${i}`} className="inline-flex flex-col align-middle mx-1">
-                                <input 
-                                    type="text" 
-                                    className={`w-20 sm:w-24 px-1 py-0.5 text-sm md:text-base border-b-2 bg-gray-50 focus:outline-none transition-colors text-center font-semibold rounded-t-sm ${
-                                        isSubmitted 
-                                            ? (isCorrect 
-                                                ? "border-green-500 bg-green-50 text-green-700" 
-                                                : "border-red-500 bg-red-50 text-red-700")
-                                            : "border-indigo-300 focus:border-indigo-600 text-indigo-900"
-                                    }`}
-                                    value={userInput}
-                                    onChange={(e) => onInputChange && onInputChange(currentIndex, e.target.value)}
-                                    disabled={isSubmitted}
-                                    autoComplete="off"
-                                />
-                                {isSubmitted && !isCorrect && (
-                                    <span className="text-[10px] text-green-600 font-bold text-center animate-fade-in block mt-0.5">
-                                        {cleanWord}
-                                    </span>
-                                )}
-                            </span>
-                        );
-                    }
-
-                    return (
-                        <span 
-                            key={i}
-                            className={`cursor-pointer transition-all duration-300 rounded-sm px-0.5 mx-[-1px] border-b-2 border-transparent
-                                ${isHighlighted 
-                                    ? 'bg-yellow-300 text-yellow-900 shadow-sm scale-105 inline-block font-medium border-yellow-400 transform -translate-y-0.5' 
-                                    : 'hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200'}
-                            `}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onWordClick(part.replace(/[.,!?;:()"]/g, ""));
-                            }}
-                        >
-                            {part}
-                        </span>
-                    );
-                });
-            } else if (node.nodeType === Node.ELEMENT_NODE) {
-                const element = node as HTMLElement;
-                const tagName = element.tagName.toLowerCase();
-                const children = Array.from(element.childNodes).map((child, i) => <React.Fragment key={i}>{processNode(child)}</React.Fragment>);
-                
-                if (tagName === 'b' || tagName === 'strong') {
-                    return <strong className="font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 bg-indigo-50/50 rounded px-1 box-decoration-clone">{children}</strong>;
-                }
-                if (tagName === 'br') return <br />;
-                if (tagName === 'p') return <p className="mb-6">{children}</p>;
-                
-                return <span>{children}</span>;
-            }
-            return null;
-        };
-
-        return Array.from(tempDiv.childNodes).map((node, i) => <React.Fragment key={i}>{processNode(node)}</React.Fragment>);
+// --- Interactive Story Text Component ---
+const InteractiveStoryText: React.FC<{
+  htmlContent: string;
+  onWordClick: (word: string) => void;
+  highlightIndex: number;
+  isClozeMode: boolean;
+  hiddenIndices: number[];
+  userInputs: Record<number, string>;
+  onInputChange: (index: number, value: string) => void;
+  isSubmitted: boolean;
+}> = ({ htmlContent, onWordClick, highlightIndex, isClozeMode, hiddenIndices, userInputs, onInputChange, isSubmitted }) => {
+  // Parse HTML string into usable segments (preserving bold tags)
+  const segments = useMemo(() => {
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    
+    const result: { text: string; isBold: boolean }[] = [];
+    
+    const traverse = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        result.push({ text: node.textContent || "", isBold: false });
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        const isBold = el.tagName === 'B' || el.tagName === 'STRONG';
+        el.childNodes.forEach(child => {
+           if (child.nodeType === Node.TEXT_NODE) {
+             result.push({ text: child.textContent || "", isBold: isBold });
+           } else {
+             traverse(child);
+           }
+        });
+      }
     };
+    
+    tempDiv.childNodes.forEach(traverse);
+    return result;
+  }, [htmlContent]);
 
-    return <>{createMarkup()}</>;
-});
+  let globalWordIndex = 0;
+
+  return (
+    <div className="leading-relaxed">
+      {segments.map((segment, segIdx) => {
+        const parts = segment.text.split(/(\s+)/);
+        
+        return parts.map((part, partIdx) => {
+          if (part.trim().length === 0) {
+            return <span key={`${segIdx}-${partIdx}`}>{part}</span>;
+          }
+          
+          const isWord = /[a-zA-Z0-9À-ỹ]+/.test(part);
+          
+          if (!isWord) {
+             return <span key={`${segIdx}-${partIdx}`}>{part}</span>;
+          }
+
+          const currentWordIndex = globalWordIndex++;
+          const isHidden = isClozeMode && hiddenIndices.includes(currentWordIndex);
+          const cleanWord = part.replace(/[.,!?;:"()]/g, "");
+
+          if (isHidden) {
+             const userAnswer = userInputs[currentWordIndex] || "";
+             const isCorrect = userAnswer.toLowerCase().trim() === cleanWord.toLowerCase().trim();
+             
+             return (
+               <span key={`${segIdx}-${partIdx}`} className="inline-block mx-1 relative">
+                 <input 
+                    type="text" 
+                    value={userAnswer}
+                    disabled={isSubmitted}
+                    onChange={(e) => onInputChange(currentWordIndex, e.target.value)}
+                    className={`w-24 px-2 py-0.5 rounded border-b-2 outline-none text-center font-bold transition-colors ${
+                        isSubmitted 
+                           ? (isCorrect ? "bg-green-50 border-green-500 text-green-700" : "bg-red-50 border-red-500 text-red-700") 
+                           : "bg-gray-50 border-indigo-300 focus:border-indigo-600 text-indigo-900"
+                    }`}
+                 />
+                 {isSubmitted && !isCorrect && (
+                    <span className="absolute -top-5 left-0 w-full text-center text-[10px] text-green-600 font-bold bg-green-50 rounded px-1 animate-fade-in">
+                        {cleanWord}
+                    </span>
+                 )}
+               </span>
+             );
+          }
+
+          return (
+            <span
+              key={`${segIdx}-${partIdx}`}
+              onClick={() => onWordClick(cleanWord)}
+              className={`cursor-pointer transition-all duration-200 rounded px-0.5 mx-0.5 inline-block
+                ${highlightIndex === currentWordIndex 
+                    ? 'bg-yellow-300 text-yellow-900 scale-110 shadow-sm font-bold z-10' 
+                    : segment.isBold 
+                        ? 'font-bold text-indigo-700 hover:text-indigo-900 border-b-2 border-indigo-100' 
+                        : 'hover:bg-indigo-50 hover:text-indigo-600'
+                }
+              `}
+            >
+              {part}
+            </span>
+          );
+        });
+      })}
+    </div>
+  );
+};
 
 export default App;
