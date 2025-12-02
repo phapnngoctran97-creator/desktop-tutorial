@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse, WordSuggestion, QuizQuestion } from './types';
 import { translateText, generateStoryFromWords, lookupWord, generateSpeech, getWordSuggestions, generateQuizFromWords } from './services/geminiService';
@@ -15,7 +16,8 @@ import {
   ArrowsRightLeftIcon,
   ClipboardDocumentCheckIcon,
   CheckCircleIcon,
-  XCircleIcon
+  XCircleIcon,
+  ChevronDownIcon
 } from './components/Icons';
 
 // Constants
@@ -146,6 +148,30 @@ const App: React.FC = () => {
     });
     return groupList;
   }, [history]);
+
+  const groupedStories = useMemo(() => {
+    const groupList: { dateLabel: string; items: GeneratedStory[] }[] = [];
+    const sortedStories = [...stories].sort((a, b) => b.timestamp - a.timestamp);
+
+    sortedStories.forEach(item => {
+        const date = new Date(item.timestamp);
+        const dateLabel = date.toLocaleDateString('vi-VN', {
+            weekday: 'long',
+            day: '2-digit', 
+            month: '2-digit', 
+            year: 'numeric'
+        });
+        const formattedDateLabel = dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
+
+        let group = groupList.find(g => g.dateLabel === formattedDateLabel);
+        if (!group) {
+            group = { dateLabel: formattedDateLabel, items: [] };
+            groupList.push(group);
+        }
+        group.items.push(item);
+    });
+    return groupList;
+  }, [stories]);
 
   useEffect(() => {
     const savedHistory = localStorage.getItem(STORAGE_KEY_HISTORY);
@@ -899,10 +925,14 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-4">
                 {groupedHistory.map((group, groupIdx) => (
-                    <div key={groupIdx}>
-                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">{group.dateLabel}</h3>
+                    <DateAccordion 
+                        key={group.dateLabel} 
+                        title={group.dateLabel} 
+                        count={group.items.length} 
+                        defaultOpen={groupIdx === 0}
+                    >
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {group.items.map((item) => (
                                 <div 
@@ -933,7 +963,7 @@ const App: React.FC = () => {
                                 </div>
                             ))}
                         </div>
-                    </div>
+                    </DateAccordion>
                 ))}
                 {history.length === 0 && (
                     <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
@@ -1007,153 +1037,164 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            <div className="space-y-8">
-                {stories.map((story) => (
-                <article key={story.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden group">
-                    <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-purple-100 p-2 rounded-lg">
-                            <BookOpenIcon className="w-5 h-5 text-purple-600" />
-                        </div>
-                        <div>
-                            <p className="font-semibold text-gray-800">{story.theme}</p>
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                                <span>{new Date(story.timestamp).toLocaleDateString('vi-VN')}</span>
-                                {story.generationTimeMs && (
-                                    <span className="flex items-center gap-0.5 bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-100">
-                                        ⚡ {(story.generationTimeMs / 1000).toFixed(1)}s
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        {/* Voice Selector */}
-                        <div className="hidden sm:flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-gray-200">
-                            <select 
-                                value={selectedVoice}
-                                onChange={(e) => setSelectedVoice(e.target.value)}
-                                className="text-xs bg-transparent border-none focus:ring-0 text-gray-600 cursor-pointer outline-none w-24"
-                            >
-                                {VOICE_OPTIONS.map(v => (
-                                    <option key={v.id} value={v.id}>{v.label}</option>
-                                ))}
-                            </select>
-                        </div>
-                        
-                        {/* Audio Controls */}
-                         <button 
-                            onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
-                            className={`p-2.5 rounded-full transition-all flex items-center gap-2 ${
-                                activeAudioId === story.id 
-                                ? 'bg-purple-600 text-white shadow-md' 
-                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                            }`}
-                        >
-                            {activeAudioId === story.id && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
-                        </button>
-                        
-                        <button onClick={() => handleDeleteStory(story.id)} className="text-gray-400 hover:text-red-500 p-2">
-                             <TrashIcon className="w-5 h-5" />
-                        </button>
-                    </div>
-                    </div>
-                    
-                    <div className="p-6">
-                        {/* Interactive Story Content */}
-                        <div 
-                             className="prose prose-lg max-w-none mb-6 relative"
-                             onMouseUp={handleSelectionLookup}
-                             onTouchEnd={handleSelectionLookup}
-                        >
-                             <div className="text-gray-800 leading-relaxed font-serif text-lg tracking-wide whitespace-pre-line selection:bg-purple-200 selection:text-purple-900">
-                                 {/* We render raw text and highlight via dangerouslySetInnerHTML but with safe content */}
-                                 <InteractiveStoryText 
-                                    htmlContent={story.content} 
-                                    onWordClick={(word) => handleWordClick(word, story.content, null)}
-                                    highlightIndex={activeAudioId === story.id ? highlightedWordIndex : -1}
-                                 />
-                             </div>
-                             
-                             {/* Floating Lookup Button */}
-                             {selectionPopup && (
-                                 <div 
-                                     className="selection-popup fixed z-50 transform -translate-x-1/2 -translate-y-full mb-2"
-                                     style={{ left: selectionPopup.x, top: selectionPopup.y }}
-                                 >
-                                     <button
-                                         onClick={() => handleWordClick(selectionPopup.text, story.content, null)}
-                                         className="bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1 hover:bg-black transition-colors"
-                                     >
-                                         <BookOpenIcon className="w-3 h-3" />
-                                         Tra cứu
-                                     </button>
-                                     <div className="w-2 h-2 bg-gray-900 rotate-45 absolute left-1/2 -bottom-1 -translate-x-1/2"></div>
-                                 </div>
-                             )}
-                        </div>
-
-                        {/* Controls Bar */}
-                        <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 pt-4">
-                             <button 
-                                onClick={() => toggleVietnamese(story.id)}
-                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
-                                    showVietnamese[story.id] 
-                                    ? 'bg-blue-50 text-blue-700' 
-                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                                }`}
-                             >
-                                 {showVietnamese[story.id] ? "Ẩn dịch nghĩa" : "Xem dịch nghĩa"}
-                             </button>
-
-                             <button 
-                                onClick={() => toggleGrammar(story.id)}
-                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-1 ${
-                                    showGrammar[story.id] 
-                                    ? 'bg-teal-50 text-teal-700' 
-                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                                }`}
-                             >
-                                 <AcademicCapIcon className="w-4 h-4" />
-                                 {showGrammar[story.id] ? "Ẩn ngữ pháp" : "Phân tích ngữ pháp"}
-                             </button>
-                        </div>
-
-                        {/* Vietnamese Translation */}
-                        {showVietnamese[story.id] && (
-                            <div className="mt-4 p-4 bg-blue-50 rounded-xl text-gray-700 text-base leading-relaxed border border-blue-100 animate-fade-in">
-                                <h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Bản dịch tiếng Việt</h4>
-                                {story.vietnameseContent}
-                            </div>
-                        )}
-                        
-                        {/* Grammar Analysis */}
-                        {showGrammar[story.id] && (
-                            <div className="mt-4 p-5 bg-teal-50 rounded-xl border border-teal-100 animate-fade-in">
-                                <h4 className="text-sm font-bold text-teal-800 uppercase mb-3 flex items-center gap-2">
-                                    <SparklesIcon className="w-4 h-4" />
-                                    Góc Ngữ Pháp
-                                </h4>
-                                {story.grammarPoints && story.grammarPoints.length > 0 ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {story.grammarPoints.map((point, idx) => (
-                                            <div key={idx} className="bg-white p-3 rounded-lg shadow-sm border border-teal-100/50">
-                                                <p className="font-bold text-teal-700 text-sm mb-1">{point.structure}</p>
-                                                <p className="text-gray-600 text-xs mb-2">{point.explanation}</p>
-                                                <div className="bg-gray-50 p-2 rounded text-xs text-gray-500 italic border-l-2 border-teal-300">
-                                                    "{point.exampleInStory}"
-                                                </div>
-                                                <p className="mt-2 text-[10px] text-teal-600 font-medium">💡 Mẹo: {point.memoryTip}</p>
+            <div className="space-y-4">
+                {groupedStories.map((group, groupIdx) => (
+                    <DateAccordion
+                        key={group.dateLabel}
+                        title={group.dateLabel}
+                        count={group.items.length}
+                        defaultOpen={groupIdx === 0}
+                    >
+                        <div className="space-y-6">
+                            {group.items.map((story) => (
+                                <article key={story.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden group">
+                                    <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                                    <div className="flex items-center gap-3">
+                                        <div className="bg-purple-100 p-2 rounded-lg">
+                                            <BookOpenIcon className="w-5 h-5 text-purple-600" />
+                                        </div>
+                                        <div>
+                                            <p className="font-semibold text-gray-800">{story.theme}</p>
+                                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                                <span>{new Date(story.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                {story.generationTimeMs && (
+                                                    <span className="flex items-center gap-0.5 bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-100">
+                                                        ⚡ {(story.generationTimeMs / 1000).toFixed(1)}s
+                                                    </span>
+                                                )}
                                             </div>
-                                        ))}
+                                        </div>
                                     </div>
-                                ) : (
-                                    <p className="text-sm text-gray-500 italic">Dữ liệu ngữ pháp chưa có cho câu chuyện này.</p>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                </article>
+                                    <div className="flex items-center gap-3">
+                                        {/* Voice Selector */}
+                                        <div className="hidden sm:flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-gray-200">
+                                            <select 
+                                                value={selectedVoice}
+                                                onChange={(e) => setSelectedVoice(e.target.value)}
+                                                className="text-xs bg-transparent border-none focus:ring-0 text-gray-600 cursor-pointer outline-none w-24"
+                                            >
+                                                {VOICE_OPTIONS.map(v => (
+                                                    <option key={v.id} value={v.id}>{v.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        
+                                        {/* Audio Controls */}
+                                        <button 
+                                            onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
+                                            className={`p-2.5 rounded-full transition-all flex items-center gap-2 ${
+                                                activeAudioId === story.id 
+                                                ? 'bg-purple-600 text-white shadow-md' 
+                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            {activeAudioId === story.id && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
+                                        </button>
+                                        
+                                        <button onClick={() => handleDeleteStory(story.id)} className="text-gray-400 hover:text-red-500 p-2">
+                                            <TrashIcon className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                    </div>
+                                    
+                                    <div className="p-6">
+                                        {/* Interactive Story Content */}
+                                        <div 
+                                            className="prose prose-lg max-w-none mb-6 relative"
+                                            onMouseUp={handleSelectionLookup}
+                                            onTouchEnd={handleSelectionLookup}
+                                        >
+                                            <div className="text-gray-800 leading-relaxed font-serif text-lg tracking-wide whitespace-pre-line selection:bg-purple-200 selection:text-purple-900">
+                                                {/* We render raw text and highlight via dangerouslySetInnerHTML but with safe content */}
+                                                <InteractiveStoryText 
+                                                    htmlContent={story.content} 
+                                                    onWordClick={(word) => handleWordClick(word, story.content, null)}
+                                                    highlightIndex={activeAudioId === story.id ? highlightedWordIndex : -1}
+                                                />
+                                            </div>
+                                            
+                                            {/* Floating Lookup Button */}
+                                            {selectionPopup && (
+                                                <div 
+                                                    className="selection-popup fixed z-50 transform -translate-x-1/2 -translate-y-full mb-2"
+                                                    style={{ left: selectionPopup.x, top: selectionPopup.y }}
+                                                >
+                                                    <button
+                                                        onClick={() => handleWordClick(selectionPopup.text, story.content, null)}
+                                                        className="bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1 hover:bg-black transition-colors"
+                                                    >
+                                                        <BookOpenIcon className="w-3 h-3" />
+                                                        Tra cứu
+                                                    </button>
+                                                    <div className="w-2 h-2 bg-gray-900 rotate-45 absolute left-1/2 -bottom-1 -translate-x-1/2"></div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Controls Bar */}
+                                        <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 pt-4">
+                                            <button 
+                                                onClick={() => toggleVietnamese(story.id)}
+                                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
+                                                    showVietnamese[story.id] 
+                                                    ? 'bg-blue-50 text-blue-700' 
+                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                                }`}
+                                            >
+                                                {showVietnamese[story.id] ? "Ẩn dịch nghĩa" : "Xem dịch nghĩa"}
+                                            </button>
+
+                                            <button 
+                                                onClick={() => toggleGrammar(story.id)}
+                                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-1 ${
+                                                    showGrammar[story.id] 
+                                                    ? 'bg-teal-50 text-teal-700' 
+                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                                }`}
+                                            >
+                                                <AcademicCapIcon className="w-4 h-4" />
+                                                {showGrammar[story.id] ? "Ẩn ngữ pháp" : "Phân tích ngữ pháp"}
+                                            </button>
+                                        </div>
+
+                                        {/* Vietnamese Translation */}
+                                        {showVietnamese[story.id] && (
+                                            <div className="mt-4 p-4 bg-blue-50 rounded-xl text-gray-700 text-base leading-relaxed border border-blue-100 animate-fade-in">
+                                                <h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Bản dịch tiếng Việt</h4>
+                                                {story.vietnameseContent}
+                                            </div>
+                                        )}
+                                        
+                                        {/* Grammar Analysis */}
+                                        {showGrammar[story.id] && (
+                                            <div className="mt-4 p-5 bg-teal-50 rounded-xl border border-teal-100 animate-fade-in">
+                                                <h4 className="text-sm font-bold text-teal-800 uppercase mb-3 flex items-center gap-2">
+                                                    <SparklesIcon className="w-4 h-4" />
+                                                    Góc Ngữ Pháp
+                                                </h4>
+                                                {story.grammarPoints && story.grammarPoints.length > 0 ? (
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        {story.grammarPoints.map((point, idx) => (
+                                                            <div key={idx} className="bg-white p-3 rounded-lg shadow-sm border border-teal-100/50">
+                                                                <p className="font-bold text-teal-700 text-sm mb-1">{point.structure}</p>
+                                                                <p className="text-gray-600 text-xs mb-2">{point.explanation}</p>
+                                                                <div className="bg-gray-50 p-2 rounded text-xs text-gray-500 italic border-l-2 border-teal-300">
+                                                                    "{point.exampleInStory}"
+                                                                </div>
+                                                                <p className="mt-2 text-[10px] text-teal-600 font-medium">💡 Mẹo: {point.memoryTip}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-sm text-gray-500 italic">Dữ liệu ngữ pháp chưa có cho câu chuyện này.</p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    </DateAccordion>
                 ))}
             </div>
             </section>
@@ -1218,6 +1259,34 @@ const App: React.FC = () => {
       )}
     </div>
   );
+};
+
+// --- New Component: Date Accordion ---
+const DateAccordion: React.FC<{ title: string; count: number; children: React.ReactNode; defaultOpen?: boolean }> = ({ title, count, children, defaultOpen = false }) => {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+
+    return (
+        <div className="border border-gray-100 rounded-xl overflow-hidden bg-white mb-4 shadow-sm hover:shadow-md transition-shadow">
+            <button 
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+            >
+                <div>
+                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">{title}</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">{count} mục</p>
+                </div>
+                <div className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>
+                    <ChevronDownIcon className="w-5 h-5 text-gray-400" />
+                </div>
+            </button>
+            
+            <div className={`transition-all duration-300 ease-in-out ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+                <div className="p-4 bg-white border-t border-gray-100">
+                    {children}
+                </div>
+            </div>
+        </div>
+    );
 };
 
 // Helper component for interactive text highlighting
