@@ -666,7 +666,7 @@ const App: React.FC = () => {
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookOpenIcon className="w-8 h-8 text-blue-600" />
-            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">VocaStory AI</h1>
+            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">Learning English By TNP</h1>
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <ClockIcon className="w-4 h-4" />
