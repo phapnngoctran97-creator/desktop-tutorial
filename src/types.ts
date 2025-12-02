@@ -40,6 +40,7 @@ export interface TranslationResponse {
   phonetic: string; // IPA transcription
   partOfSpeech: string;
   usageHint: string;
+  emoji?: string; // Visual illustration using Emoji
   sourceEnglish?: string; // Always holds the English text content
   tenses?: {
     past: string;    // e.g., went / walked

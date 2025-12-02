@@ -20,7 +20,8 @@ import {
   ChevronDownIcon,
   PencilSquareIcon,
   TrophyIcon,
-  BoltIcon
+  BoltIcon,
+  MicrophoneIcon
 } from './components/Icons';
 
 // Constants
@@ -110,6 +111,7 @@ const App: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
   const [audioProgress, setAudioProgress] = useState<number>(0);
   const [highlightedWordIndex, setHighlightedWordIndex] = useState<number>(-1);
+  const [isListening, setIsListening] = useState(false);
   
   // Audio Cache
   const audioCacheRef = useRef<Record<string, string>>({}); // Key: id-voiceId, Value: base64 string
@@ -315,6 +317,43 @@ const App: React.FC = () => {
       setSuggestions([]);
       setShowSuggestions(false);
       triggerTranslate(suggestion.word);
+  };
+  
+  const handleVoiceInput = () => {
+    if (!('webkitSpeechRecognition' in window)) {
+        alert("Trình duyệt của bạn không hỗ trợ nhận diện giọng nói.");
+        return;
+    }
+
+    const recognition = new (window as any).webkitSpeechRecognition();
+    recognition.lang = direction === 'vi_en' ? 'vi-VN' : 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+        setIsListening(true);
+    };
+
+    recognition.onend = () => {
+        setIsListening(false);
+    };
+
+    recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setInputText(transcript);
+        ignoreFetchRef.current = true; // avoid autocomplete trigger immediately
+        setTimeout(() => triggerTranslate(transcript), 500);
+    };
+
+    recognition.onerror = (event: any) => {
+        console.error("Voice input error", event.error);
+        setIsListening(false);
+        if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+             alert("Vui lòng cấp quyền Microphone cho trang web để sử dụng tính năng này.");
+        }
+    };
+
+    recognition.start();
   };
 
   const performTranslation = async (text: string) => {
@@ -956,6 +995,15 @@ const App: React.FC = () => {
                                     }
                                 }}
                             />
+                            {/* Voice Input Button */}
+                            <button
+                                onClick={handleVoiceInput}
+                                className={`absolute right-3 bottom-3 p-2 rounded-full transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                                title="Nhập bằng giọng nói"
+                            >
+                                <MicrophoneIcon className="w-5 h-5" />
+                            </button>
+
                             {inputText && (
                                 <button 
                                     onClick={() => { setInputText(''); setSuggestions([]); }}
@@ -1025,6 +1073,13 @@ const App: React.FC = () => {
                 {/* Translation Result Card */}
                 {translatedResult && (
                     <div className="mt-8 p-6 md:p-8 bg-indigo-50 rounded-2xl border border-indigo-100 animate-fade-in relative group transition-all">
+                        {/* Emoji Visual Icon */}
+                        {translatedResult.emoji && (
+                            <div className="absolute top-4 right-4 text-6xl opacity-20 group-hover:opacity-100 transition-opacity select-none pointer-events-none filter drop-shadow-sm">
+                                {translatedResult.emoji}
+                            </div>
+                        )}
+                        
                         <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-4">
                             <div className="flex-1">
                                 <div className="flex items-baseline flex-wrap gap-3">

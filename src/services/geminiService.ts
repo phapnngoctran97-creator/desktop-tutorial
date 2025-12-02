@@ -56,6 +56,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       3. "partOfSpeech": The grammatical category (e.g., Noun, Verb).
       4. "usageHint": A brief tip, collocation, or very short example of how to use the English word/phrase naturally.
       5. "tenses": If the word is a VERB, provide an object with "past" (Simple Past), "present" (Simple Present 3rd person/Base), and "future" (Simple Future). If not a verb or not applicable, return empty strings for these fields.
+      6. "emoji": A single relevant emoji or a set of emojis representing the word/meaning to act as an icon/illustration. If abstract, use a symbolic emoji.
       
       Response JSON Schema:
       {
@@ -63,6 +64,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
         "phonetic": "string",
         "partOfSpeech": "string",
         "usageHint": "string",
+        "emoji": "string",
         "tenses": {
            "past": "string",
            "present": "string",
@@ -84,6 +86,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
             phonetic: { type: Type.STRING },
             partOfSpeech: { type: Type.STRING },
             usageHint: { type: Type.STRING },
+            emoji: { type: Type.STRING },
             tenses: {
               type: Type.OBJECT,
               properties: {
