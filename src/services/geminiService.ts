@@ -241,7 +241,7 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
   }
 };
 
-export const lookupWord = async (text: string, context: string): Promise<{ phonetic: string, type: string, meaning: string, example: string }> => {
+export const lookupWord = async (text: string, context: string): Promise<{ phonetic: string, type: string, meaning: string, example: string, emoji?: string }> => {
   try {
     const ai = getAIClient();
     
@@ -259,33 +259,55 @@ export const lookupWord = async (text: string, context: string): Promise<{ phone
           - meaning: The Vietnamese translation.
           - example: A grammatical note or key vocabulary from the sentence.
         `;
+        // NO Emoji for sentences
+         const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                safetySettings: safetySettings,
+                responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    phonetic: { type: Type.STRING },
+                    type: { type: Type.STRING },
+                    meaning: { type: Type.STRING },
+                    example: { type: Type.STRING },
+                },
+                },
+            }
+        });
+        const cleanText = cleanJsonResponse(response.text || "{}");
+        return JSON.parse(cleanText);
+
     } else {
         prompt = `
-          Define the word/phrase "${text}" in Vietnamese based on context: "${context.substring(0, 100)}...".
-          Return JSON: phonetic, type, meaning, example (English).
+          Define the word "${text}" in Vietnamese based on context: "${context.substring(0, 100)}...".
+          Return JSON: phonetic, type, meaning, example (English), and a relevant emoji.
         `;
+        // Include Emoji for single words
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                safetySettings: safetySettings,
+                responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    phonetic: { type: Type.STRING },
+                    type: { type: Type.STRING },
+                    meaning: { type: Type.STRING },
+                    example: { type: Type.STRING },
+                    emoji: { type: Type.STRING },
+                },
+                },
+            }
+        });
+        const cleanText = cleanJsonResponse(response.text || "{}");
+        return JSON.parse(cleanText);
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        safetySettings: safetySettings,
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            phonetic: { type: Type.STRING },
-            type: { type: Type.STRING },
-            meaning: { type: Type.STRING },
-            example: { type: Type.STRING },
-          },
-        },
-      }
-    });
-
-    const cleanText = cleanJsonResponse(response.text || "{}");
-    return JSON.parse(cleanText);
   } catch (error) {
     return { phonetic: "", type: "", meaning: "Lỗi tra cứu", example: "" };
   }

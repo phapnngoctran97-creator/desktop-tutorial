@@ -1073,9 +1073,9 @@ const App: React.FC = () => {
                 {/* Translation Result Card */}
                 {translatedResult && (
                     <div className="mt-8 p-6 md:p-8 bg-indigo-50 rounded-2xl border border-indigo-100 animate-fade-in relative group transition-all">
-                        {/* Emoji Visual Icon */}
+                        {/* Emoji Visual Icon (Improved Position) */}
                         {translatedResult.emoji && (
-                            <div className="absolute top-4 right-4 text-6xl opacity-20 group-hover:opacity-100 transition-opacity select-none pointer-events-none filter drop-shadow-sm">
+                            <div className="absolute top-2 right-2 md:top-6 md:right-6 text-5xl md:text-7xl opacity-90 drop-shadow-md select-none pointer-events-none animate-bounce-in">
                                 {translatedResult.emoji}
                             </div>
                         )}
@@ -1559,7 +1559,10 @@ const App: React.FC = () => {
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 border border-gray-200" onClick={e => e.stopPropagation()}>
             <div className="bg-gradient-to-br from-indigo-600 to-blue-600 px-6 py-5 flex justify-between items-center relative overflow-hidden">
               <div className="absolute inset-0 bg-white/10 opacity-50 pattern-grid"></div>
-              <h3 className="text-2xl font-bold text-white capitalize relative z-10">{selectedWord.word}</h3>
+              <div className="flex items-center gap-3 relative z-10">
+                <h3 className="text-2xl font-bold text-white capitalize">{selectedWord.word}</h3>
+                {selectedWord.emoji && <span className="text-4xl filter drop-shadow-md">{selectedWord.emoji}</span>}
+              </div>
               <button onClick={() => setSelectedWord(null)} className="text-white/80 hover:text-white bg-white/20 hover:bg-white/30 p-1.5 rounded-full transition-colors relative z-10">
                 <XMarkIcon className="w-5 h-5" />
               </button>
@@ -1639,28 +1642,32 @@ const DateAccordion: React.FC<{ title: string; count: number; children: React.Re
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm transition-all hover:border-indigo-200">
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm transition-all duration-300">
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors"
+        className="w-full flex items-center justify-between p-4 bg-gray-50/50 hover:bg-gray-100/80 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <span className="font-bold text-gray-700">{title}</span>
-          <span className="bg-white border border-gray-200 text-gray-500 text-xs px-2 py-0.5 rounded-full font-medium">{count} items</span>
+            <h3 className="font-bold text-gray-700 text-base md:text-lg">{title}</h3>
+            <span className="text-xs bg-white border border-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium shadow-sm">
+                {count} mục
+            </span>
         </div>
         <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
       </button>
       
-      <div className={`transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
-        <div className="p-4 border-t border-gray-100">
-          {children}
+      <div 
+        className={`transition-all duration-500 ease-in-out overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}
+      >
+        <div className="p-4 bg-white border-t border-gray-100">
+            {children}
         </div>
       </div>
     </div>
   );
 };
 
-// --- Interactive Story Text Component ---
+// --- Updated Component: InteractiveStoryText ---
 const InteractiveStoryText: React.FC<{
   htmlContent: string;
   onWordClick: (word: string) => void;
@@ -1671,100 +1678,83 @@ const InteractiveStoryText: React.FC<{
   onInputChange: (index: number, value: string) => void;
   isSubmitted: boolean;
 }> = ({ htmlContent, onWordClick, highlightIndex, isClozeMode, hiddenIndices, userInputs, onInputChange, isSubmitted }) => {
-  // Parse HTML string into usable segments (preserving bold tags)
-  const segments = useMemo(() => {
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = htmlContent;
-    
-    const result: { text: string; isBold: boolean }[] = [];
-    
-    const traverse = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        result.push({ text: node.textContent || "", isBold: false });
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const el = node as HTMLElement;
-        const isBold = el.tagName === 'B' || el.tagName === 'STRONG';
-        el.childNodes.forEach(child => {
-           if (child.nodeType === Node.TEXT_NODE) {
-             result.push({ text: child.textContent || "", isBold: isBold });
-           } else {
-             traverse(child);
-           }
-        });
-      }
-    };
-    
-    tempDiv.childNodes.forEach(traverse);
-    return result;
-  }, [htmlContent]);
-
-  let globalWordIndex = 0;
+  
+  // Parse content safely
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = htmlContent;
+  const plainText = tempDiv.textContent || "";
+  
+  // Split but preserve structure for word mapping
+  // We use the same split logic as Cloze Test initialization
+  const wordsAndSpaces = plainText.split(/(\s+)/);
+  
+  // Track real word index for highlighting and cloze test
+  let wordCounter = 0;
 
   return (
-    <div className="leading-relaxed">
-      {segments.map((segment, segIdx) => {
-        const parts = segment.text.split(/(\s+)/);
-        
-        return parts.map((part, partIdx) => {
-          if (part.trim().length === 0) {
-            return <span key={`${segIdx}-${partIdx}`}>{part}</span>;
-          }
-          
-          const isWord = /[a-zA-Z0-9À-ỹ]+/.test(part);
-          
-          if (!isWord) {
-             return <span key={`${segIdx}-${partIdx}`}>{part}</span>;
-          }
+    <span>
+        {wordsAndSpaces.map((segment, idx) => {
+            // Check if segment is a word (not whitespace or punctuation-only)
+            const isWord = segment.trim().length > 0 && /[a-zA-Z]/.test(segment);
+            
+            if (!isWord) {
+                return <span key={idx}>{segment}</span>;
+            }
 
-          const currentWordIndex = globalWordIndex++;
-          const isHidden = isClozeMode && hiddenIndices.includes(currentWordIndex);
-          const cleanWord = part.replace(/[.,!?;:"()]/g, "");
+            const currentWordIndex = wordCounter++;
+            const isHidden = isClozeMode && hiddenIndices.includes(currentWordIndex);
+            
+            // Clean word for comparison (remove punctuation)
+            const cleanWord = segment.replace(/[.,!?;:()"]/g, "");
 
-          if (isHidden) {
-             const userAnswer = userInputs[currentWordIndex] || "";
-             const isCorrect = userAnswer.toLowerCase().trim() === cleanWord.toLowerCase().trim();
-             
-             return (
-               <span key={`${segIdx}-${partIdx}`} className="inline-block mx-1 relative">
-                 <input 
-                    type="text" 
-                    value={userAnswer}
-                    disabled={isSubmitted}
-                    onChange={(e) => onInputChange(currentWordIndex, e.target.value)}
-                    className={`w-24 px-2 py-0.5 rounded border-b-2 outline-none text-center font-bold transition-colors ${
-                        isSubmitted 
-                           ? (isCorrect ? "bg-green-50 border-green-500 text-green-700" : "bg-red-50 border-red-500 text-red-700") 
-                           : "bg-gray-50 border-indigo-300 focus:border-indigo-600 text-indigo-900"
-                    }`}
-                 />
-                 {isSubmitted && !isCorrect && (
-                    <span className="absolute -top-5 left-0 w-full text-center text-[10px] text-green-600 font-bold bg-green-50 rounded px-1 animate-fade-in">
-                        {cleanWord}
+            if (isHidden) {
+                const isCorrect = isSubmitted && userInputs[currentWordIndex]?.toLowerCase().trim() === cleanWord.toLowerCase();
+                const isWrong = isSubmitted && !isCorrect;
+
+                return (
+                    <span key={idx} className="inline-block relative mx-0.5">
+                        <input
+                            type="text"
+                            value={userInputs[currentWordIndex] || ''}
+                            onChange={(e) => onInputChange(currentWordIndex, e.target.value)}
+                            disabled={isSubmitted && isCorrect}
+                            className={`w-24 md:w-32 px-2 py-0.5 border-b-2 text-center outline-none bg-transparent transition-all font-sans text-base
+                                ${isSubmitted 
+                                    ? (isCorrect ? 'border-green-500 text-green-700 font-bold bg-green-50/50' : 'border-red-500 text-red-700 bg-red-50/50') 
+                                    : 'border-indigo-300 focus:border-indigo-600 text-indigo-900 bg-indigo-50/30'
+                                }
+                            `}
+                            placeholder={isSubmitted ? "" : "?"}
+                        />
+                         {isWrong && (
+                             <span className="absolute -top-6 left-0 right-0 text-center text-[10px] font-bold text-green-600 bg-green-50 border border-green-200 rounded px-1 py-0.5 animate-bounce-in z-10 whitespace-nowrap">
+                                 {cleanWord}
+                             </span>
+                         )}
                     </span>
-                 )}
-               </span>
-             );
-          }
+                );
+            }
 
-          return (
-            <span
-              key={`${segIdx}-${partIdx}`}
-              onClick={() => onWordClick(cleanWord)}
-              className={`cursor-pointer transition-all duration-200 rounded px-0.5 mx-0.5 inline-block
-                ${highlightIndex === currentWordIndex 
-                    ? 'bg-yellow-300 text-yellow-900 scale-110 shadow-sm font-bold z-10' 
-                    : segment.isBold 
-                        ? 'font-bold text-indigo-700 hover:text-indigo-900 border-b-2 border-indigo-100' 
-                        : 'hover:bg-indigo-50 hover:text-indigo-600'
-                }
-              `}
-            >
-              {part}
-            </span>
-          );
-        });
-      })}
-    </div>
+            // Normal Word Rendering (Highlighting Logic)
+            const isHighlighted = currentWordIndex === highlightIndex;
+            
+            return (
+                <span
+                    key={idx}
+                    onClick={() => onWordClick(cleanWord)}
+                    className={`
+                        cursor-pointer rounded-md transition-all duration-200 inline-block px-0.5 border border-transparent
+                        ${isHighlighted 
+                            ? 'bg-amber-300 text-amber-900 scale-110 shadow-sm font-bold z-10' 
+                            : 'hover:bg-purple-50 hover:text-purple-700 hover:border-purple-100'
+                        }
+                    `}
+                >
+                    {segment}
+                </span>
+            );
+        })}
+    </span>
   );
 };
 

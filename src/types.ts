@@ -33,6 +33,7 @@ export interface WordDefinition {
   type: string;
   meaning: string;
   example: string;
+  emoji?: string; // Icon minh hoạ
 }
 
 export interface TranslationResponse {
