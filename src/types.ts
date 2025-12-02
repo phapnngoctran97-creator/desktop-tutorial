@@ -41,6 +41,11 @@ export interface TranslationResponse {
   partOfSpeech: string;
   usageHint: string;
   sourceEnglish?: string; // Always holds the English text content
+  tenses?: {
+    past: string;    // e.g., went / walked
+    present: string; // e.g., goes / walks
+    future: string;  // e.g., will go / will walk
+  };
 }
 
 export interface WordSuggestion {

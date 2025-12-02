@@ -55,13 +55,19 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       ${promptInstructions}
       3. "partOfSpeech": The grammatical category (e.g., Noun, Verb).
       4. "usageHint": A brief tip, collocation, or very short example of how to use the English word/phrase naturally.
+      5. "tenses": If the word is a VERB, provide an object with "past" (Simple Past), "present" (Simple Present 3rd person/Base), and "future" (Simple Future). If not a verb or not applicable, return empty strings for these fields.
       
       Response JSON Schema:
       {
         "english": "string",
         "phonetic": "string",
         "partOfSpeech": "string",
-        "usageHint": "string"
+        "usageHint": "string",
+        "tenses": {
+           "past": "string",
+           "present": "string",
+           "future": "string"
+        }
       }
     `;
 
@@ -78,6 +84,14 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
             phonetic: { type: Type.STRING },
             partOfSpeech: { type: Type.STRING },
             usageHint: { type: Type.STRING },
+            tenses: {
+              type: Type.OBJECT,
+              properties: {
+                past: { type: Type.STRING },
+                present: { type: Type.STRING },
+                future: { type: Type.STRING },
+              }
+            }
           },
         },
       }
