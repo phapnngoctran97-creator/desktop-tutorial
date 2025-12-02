@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import { TranslationResponse, GeneratedStory, GrammarPoint } from "../types";
+import { TranslationResponse, GeneratedStory, GrammarPoint, WordSuggestion, QuizQuestion } from "../types";
 
 const getAIClient = () => {
   if (!process.env.API_KEY) {
@@ -16,6 +16,14 @@ const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
+
+// Helper to clean Markdown code blocks from JSON string
+const cleanJsonResponse = (text: string): string => {
+  if (!text) return "{}";
+  // Remove ```json ... ``` or ``` ... ``` wrappers
+  let clean = text.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+  return clean;
+};
 
 export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' = 'vi_en'): Promise<TranslationResponse> => {
   try {
@@ -39,7 +47,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
         
         Return JSON with:
         1. "english": The Vietnamese translation (Put the Vietnamese result here).
-        2. "phonetic": The IPA transcription of the INPUT English text (Important: We need the pronunciation of the source English word).
+        2. "phonetic": The IPA transcription of the INPUT English text.
       `;
     }
 
@@ -50,8 +58,8 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       
       Response JSON Schema:
       {
-        "english": "The translated result string",
-        "phonetic": "IPA string",
+        "english": "string",
+        "phonetic": "string",
         "partOfSpeech": "string",
         "usageHint": "string"
       }
@@ -75,67 +83,33 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       }
     });
 
-    const resultText = response.text;
-    if (!resultText) throw new Error("No response from AI");
-    
-    return JSON.parse(resultText) as TranslationResponse;
+    const cleanText = cleanJsonResponse(response.text || "");
+    return JSON.parse(cleanText) as TranslationResponse;
   } catch (error) {
     console.error("Gemini Translation Error:", error);
-    // Fallback in case of error
     return { 
       english: "Error translating", 
       phonetic: "",
       partOfSpeech: "Unknown", 
-      usageHint: "Please try again." 
+      usageHint: "Please check your network." 
     };
   }
 };
 
-export const generateStoryFromWords = async (words: string[], theme: string = '', type: 'story' | 'dialogue' = 'story'): Promise<{ english: string, vietnamese: string, grammarPoints: GrammarPoint[] }> => {
+export const getWordSuggestions = async (text: string, direction: 'vi_en' | 'en_vi'): Promise<WordSuggestion[]> => {
   try {
     const ai = getAIClient();
-    const wordListStr = words.join(', ');
-    const themeStr = theme ? `The content must revolve around the theme: "${theme}".` : '';
-    
-    let typeInstruction = "";
-    if (type === 'dialogue') {
-      typeInstruction = `
-        Create a natural conversation/dialogue between two specific characters.
-        1. Invent two distinct names for the characters (e.g., "Sarah", "John", "Mom", "Doctor"). 
-        2. Format the output so that EACH speaker's turn is strictly on a NEW line.
-        3. Format: "Name: Dialogue content". (Example: "Tom: Hello there.")
-        4. Do NOT use "Person A" or "Person B".
-      `;
-    } else {
-      typeInstruction = "Create a short, engaging story (approximately 150-200 words).";
-    }
+    const lang = direction === 'vi_en' ? 'Vietnamese' : 'English';
+    const targetLang = direction === 'vi_en' ? 'English' : 'Vietnamese';
+
+    if (text.length > 40) return [];
 
     const prompt = `
-      ${typeInstruction} suitable for an English learner.
-      ${themeStr}
+      The user is typing a word in ${lang}: "${text}".
+      Suggest up to 5 relevant completions or related words.
+      For each suggestion, provide the word, its part of speech, and a short meaning in ${targetLang}.
       
-      You MUST use the following vocabulary words in the content:
-      ${wordListStr}
-
-      IMPORTANT: 
-      1. Wrap every occurrence of the required vocabulary words in <b>...</b> tags (e.g., <b>word</b>).
-      2. GRAMMAR REQUIREMENT: You MUST intentionally use a variety of grammatical tenses (e.g., Simple Present, Present Continuous, Present Perfect, Simple Past, Future) and sentence structures. This is CRITICAL to help the learner understand how different tenses interact in a context.
-      3. Provide a full Vietnamese translation of the content.
-      4. ANALYSIS: Identify and analyze 2 to 3 interesting grammatical structures, tenses, or idioms used in the text.
-
-      Output JSON format:
-      {
-        "english": "The story/dialogue in English with <b>tags</b>. If dialogue, use newlines (\\n) for each speaker.",
-        "vietnamese": "The full Vietnamese translation",
-        "grammarPoints": [
-          {
-            "structure": "Name of the grammar structure (e.g., Present Perfect vs Past Simple)",
-            "explanation": "Brief explanation of why this tense/structure was used in this specific context",
-            "exampleInStory": "Quote the exact sentence from the text",
-            "memoryTip": "A short, memorable tip or rule for this grammar point"
-          }
-        ]
-      }
+      Response format: JSON Array.
     `;
 
     const response = await ai.models.generateContent({
@@ -143,7 +117,58 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        safetySettings: safetySettings, // CRITICAL: Prevent blocking of story content
+        safetySettings: safetySettings,
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              word: { type: Type.STRING },
+              type: { type: Type.STRING },
+              meaning: { type: Type.STRING }
+            }
+          }
+        }
+      }
+    });
+
+    const cleanText = cleanJsonResponse(response.text || "[]");
+    return JSON.parse(cleanText);
+  } catch (error) {
+    console.warn("Suggestion Error", error);
+    return [];
+  }
+};
+
+export const generateStoryFromWords = async (words: string[], theme: string = '', type: 'story' | 'dialogue' = 'story'): Promise<{ english: string, vietnamese: string, grammarPoints: GrammarPoint[] }> => {
+  const ai = getAIClient();
+  const wordListStr = words.join(', ');
+  
+  // ATTEMPT 1: Structured JSON Generation
+  try {
+    const typeInstruction = type === 'dialogue' 
+      ? `Create a dialogue between two named characters. Format: "Name: Content". Use newlines.` 
+      : `Create a short story (150 words).`;
+
+    const prompt = `
+      ${typeInstruction}
+      Theme: "${theme}".
+      Vocab to use: ${wordListStr}.
+      
+      Requirements:
+      1. Wrap vocabulary words in <b> tags.
+      2. Use mixed tenses (Present, Past, Perfect).
+      3. Analyze 2 grammar points.
+      
+      Return JSON with english, vietnamese, and grammarPoints.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        safetySettings: safetySettings,
         responseSchema: {
           type: Type.OBJECT,
           properties: {
@@ -166,18 +191,36 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
       }
     });
 
-    const text = response.text;
-    if (!text) throw new Error("No response from AI");
-
-    return JSON.parse(text);
+    const cleanText = cleanJsonResponse(response.text || "");
+    return JSON.parse(cleanText);
   } catch (error) {
-    console.error("Gemini Story Generation Error:", error);
-    // Fallback in case JSON parsing fails, though rare with correct config
-    return { 
-      english: "Could not generate content. Please try again with different keywords.", 
-      vietnamese: "Không thể tạo nội dung. Vui lòng thử lại.",
-      grammarPoints: []
-    };
+    console.warn("JSON Story Generation failed, falling back to simple text...", error);
+    
+    // ATTEMPT 2: Fallback to Simple Text (If JSON fails)
+    try {
+        const fallbackPrompt = `
+           Write a short English story (or dialogue) using these words: ${wordListStr}.
+           Theme: ${theme}.
+           Then provide a Vietnamese translation below it separated by "---".
+           Highlight the words using <b> tags.
+        `;
+        const fallbackRes = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: fallbackPrompt,
+            config: { safetySettings: safetySettings }
+        });
+        
+        const fullText = fallbackRes.text || "";
+        const parts = fullText.split('---');
+        
+        return {
+            english: parts[0]?.trim() || fullText,
+            vietnamese: parts[1]?.trim() || "Bản dịch đang cập nhật...",
+            grammarPoints: [] // No grammar points in fallback mode
+        };
+    } catch (fallbackError) {
+        throw new Error("Could not generate content.");
+    }
   }
 };
 
@@ -185,15 +228,8 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
   try {
     const ai = getAIClient();
     const prompt = `
-      Define the word "${word}" in Vietnamese contextually based on this sentence/context: "${context.substring(0, 100)}...".
-      
-      Return JSON:
-      {
-        "phonetic": "/.../",
-        "type": "noun/verb/adj...",
-        "meaning": "Meaning in Vietnamese",
-        "example": "A short example sentence in English"
-      }
+      Define "${word}" in Vietnamese based on context: "${context.substring(0, 50)}...".
+      Return JSON: phonetic, type, meaning, example (English).
     `;
 
     const response = await ai.models.generateContent({
@@ -214,37 +250,30 @@ export const lookupWord = async (word: string, context: string): Promise<{ phone
       }
     });
 
-    return JSON.parse(response.text || "{}");
+    const cleanText = cleanJsonResponse(response.text || "{}");
+    return JSON.parse(cleanText);
   } catch (error) {
-    console.error("Lookup Error", error);
-    return { phonetic: "", type: "", meaning: "Không thể tra cứu", example: "" };
+    return { phonetic: "", type: "", meaning: "Lỗi tra cứu", example: "" };
   }
 };
 
 export const generateSpeech = async (text: string, voice: string = 'Kore', isDialogue: boolean = false): Promise<string | undefined> => {
   const ai = getAIClient();
-  
-  // 1. Thoroughly clean the text while preserving structure for speaker detection
-  const cleanText = text
-    .replace(/<\/?[^>]+(>|$)/g, "") // Remove HTML tags
-    .replace(/\*\*/g, "")           // Remove Markdown bold
-    .replace(/\*/g, "")             // Remove asterisks
-    .replace(/#/g, "")              // Remove hashes
-    .trim();
+  const cleanText = text.replace(/<\/?[^>]+(>|$)/g, "").replace(/\*/g, "").trim();
+  if(!cleanText) return undefined;
 
-  // ATTEMPT 1: Multi-speaker (if applicable)
-  if (isDialogue) {
-    try {
+  // Use Try/Catch to handle Quota Exceeded or API Errors
+  try {
+    // 1. Try Multi-speaker if dialogue
+    if (isDialogue) {
       const speakerRegex = /^\s*([^\:\n]+)\s*:/gm;
       const matches = [...cleanText.matchAll(speakerRegex)];
       const uniqueSpeakers = [...new Set(matches.map(m => m[1].trim()))];
 
       if (uniqueSpeakers.length >= 2) {
-        const speaker1 = uniqueSpeakers[0];
-        const speaker2 = uniqueSpeakers[1];
-
-        const isPrimaryMale = ['Fenrir', 'Puck', 'Charon'].includes(voice);
-        const secondaryVoice = isPrimaryMale ? 'Kore' : 'Fenrir';
+        const primary = uniqueSpeakers[0];
+        const secondary = uniqueSpeakers[1];
+        const voice2 = ['Fenrir', 'Puck', 'Charon'].includes(voice) ? 'Kore' : 'Fenrir';
 
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash-preview-tts",
@@ -255,48 +284,77 @@ export const generateSpeech = async (text: string, voice: string = 'Kore', isDia
             speechConfig: {
               multiSpeakerVoiceConfig: {
                 speakerVoiceConfigs: [
-                  {
-                    speaker: speaker1,
-                    voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } }
-                  },
-                  {
-                    speaker: speaker2,
-                    voiceConfig: { prebuiltVoiceConfig: { voiceName: secondaryVoice } }
-                  }
+                  { speaker: primary, voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+                  { speaker: secondary, voiceConfig: { prebuiltVoiceConfig: { voiceName: voice2 } } }
                 ]
               }
             },
           },
         });
-
-        const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (audioData) return audioData;
+        const audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (audio) return audio;
       }
-    } catch (error) {
-      console.warn("Multi-speaker TTS failed, falling back to single speaker...");
     }
-  }
 
-  // ATTEMPT 2: Fallback to Single Speaker
-  try {
+    // 2. Standard Single Speaker
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text: cleanText }] }],
       config: {
         responseModalities: [Modality.AUDIO],
-        safetySettings: safetySettings, // Apply safety settings here too
+        safetySettings: safetySettings,
         speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: voice },
-          },
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
         },
       },
     });
 
     return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   } catch (error) {
-    // Return undefined to trigger Native TTS fallback in App.tsx
-    // Do NOT throw error here, just return empty so UI handles it gracefully
-    return undefined;
+    // If API fails (Quota, Network, etc.), return undefined to trigger App.tsx fallback
+    return undefined; 
+  }
+};
+
+export const generateQuizFromWords = async (words: string[]): Promise<QuizQuestion[]> => {
+  try {
+    const ai = getAIClient();
+    const wordListStr = words.join(', ');
+    
+    const prompt = `
+      Create 10 multiple-choice questions to test the user's understanding of these words: ${wordListStr}.
+      Questions can be: "What does X mean?", "Fill in the blank", or "Find the synonym".
+      Provide 4 options (A, B, C, D) and identify the correct one.
+      
+      Return JSON Array of objects.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        safetySettings: safetySettings,
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.NUMBER },
+              question: { type: Type.STRING },
+              options: { type: Type.ARRAY, items: { type: Type.STRING } },
+              correctAnswer: { type: Type.STRING },
+              explanation: { type: Type.STRING }
+            }
+          }
+        }
+      }
+    });
+
+    const cleanText = cleanJsonResponse(response.text || "[]");
+    return JSON.parse(cleanText);
+  } catch (error) {
+    console.error("Quiz Generation Error", error);
+    throw new Error("Could not generate quiz.");
   }
 };
