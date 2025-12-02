@@ -224,13 +224,30 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
   }
 };
 
-export const lookupWord = async (word: string, context: string): Promise<{ phonetic: string, type: string, meaning: string, example: string }> => {
+export const lookupWord = async (text: string, context: string): Promise<{ phonetic: string, type: string, meaning: string, example: string }> => {
   try {
     const ai = getAIClient();
-    const prompt = `
-      Define "${word}" in Vietnamese based on context: "${context.substring(0, 50)}...".
-      Return JSON: phonetic, type, meaning, example (English).
-    `;
+    
+    const isSentence = text.trim().split(/\s+/).length > 3;
+    
+    let prompt = "";
+    if (isSentence) {
+        prompt = `
+          Translate and explain this English sentence/phrase to Vietnamese: "${text}".
+          Context: "${context.substring(0, 100)}...".
+          
+          Return JSON:
+          - phonetic: (Leave empty or simplified pronunciation guide if applicable)
+          - type: "Sentence" or "Phrase"
+          - meaning: The Vietnamese translation.
+          - example: A grammatical note or key vocabulary from the sentence.
+        `;
+    } else {
+        prompt = `
+          Define the word/phrase "${text}" in Vietnamese based on context: "${context.substring(0, 100)}...".
+          Return JSON: phonetic, type, meaning, example (English).
+        `;
+    }
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',

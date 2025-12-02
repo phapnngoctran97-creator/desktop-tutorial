@@ -40,6 +40,7 @@ export interface TranslationResponse {
   phonetic: string; // IPA transcription
   partOfSpeech: string;
   usageHint: string;
+  sourceEnglish?: string; // Always holds the English text content
 }
 
 export interface WordSuggestion {

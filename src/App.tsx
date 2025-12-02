@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse, WordSuggestion, QuizQuestion } from './types';
 import { translateText, generateStoryFromWords, lookupWord, generateSpeech, getWordSuggestions, generateQuizFromWords } from './services/geminiService';
@@ -115,6 +114,9 @@ const App: React.FC = () => {
   const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [quizScore, setQuizScore] = useState(0);
+  
+  // Text Selection State
+  const [selectionPopup, setSelectionPopup] = useState<{ x: number, y: number, text: string } | null>(null);
 
   // Derived State
   const timeSinceLastGen = Date.now() - lastGenTime;
@@ -177,13 +179,18 @@ const App: React.FC = () => {
       if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
         setShowSuggestions(false);
       }
+      
+      // Hide selection popup if clicking elsewhere
+      if (selectionPopup && !(event.target as HTMLElement).closest('.selection-popup')) {
+          setSelectionPopup(null);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, []);
+  }, [selectionPopup]);
 
   // Autocomplete
   useEffect(() => {
@@ -248,8 +255,7 @@ const App: React.FC = () => {
     
     try {
       const result = await translateText(text, direction);
-      setTranslatedResult(result);
-
+      
       let englishText = "";
       let vietnameseText = "";
 
@@ -260,6 +266,8 @@ const App: React.FC = () => {
         englishText = text.trim();
         vietnameseText = result.english.trim();
       }
+      
+      setTranslatedResult({ ...result, sourceEnglish: englishText });
 
       if (englishText && englishText !== "Error translating") {
           const newItem: HistoryItem = {
@@ -348,17 +356,23 @@ const App: React.FC = () => {
     if (activeAudioId === id) stopAllAudio();
   };
 
-  const handleWordClick = async (word: string, context: string, event: React.MouseEvent) => {
-    const cleanWord = word.replace(/[.,!?;:()"]/g, '').trim();
+  const handleWordClick = async (word: string, context: string, event: React.MouseEvent | null) => {
+    if (event) event.stopPropagation();
+    
+    // Normalize text
+    const cleanWord = word.trim();
     if (!cleanWord) return;
 
     if (lookupCache[cleanWord.toLowerCase()]) {
       setSelectedWord(lookupCache[cleanWord.toLowerCase()]);
+      setSelectionPopup(null);
       return;
     }
 
     setIsLookingUp(true);
-    setSelectedWord({ word: cleanWord, phonetic: '...', type: '...', meaning: 'Đang tải...', example: '' });
+    setSelectionPopup(null);
+    // Provide an immediate UI feedback
+    setSelectedWord({ word: cleanWord, phonetic: '...', type: '...', meaning: 'Đang tra cứu...', example: '' });
 
     try {
       const definition = await lookupWord(cleanWord, context);
@@ -372,8 +386,35 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSelectionLookup = (e: React.MouseEvent | React.TouchEvent) => {
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+        const text = selection.toString().trim();
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        
+        setSelectionPopup({
+            x: rect.left + rect.width / 2,
+            y: rect.top - 10,
+            text: text
+        });
+    } else {
+        setSelectionPopup(null);
+    }
+  };
+
   const toggleVietnamese = (storyId: string) => setShowVietnamese(prev => ({ ...prev, [storyId]: !prev[storyId] }));
   const toggleGrammar = (storyId: string) => setShowGrammar(prev => ({ ...prev, [storyId]: !prev[storyId] }));
+
+  const base64ToBytes = (base64: string) => {
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  };
 
   const decodePCMData = (audioData: Uint8Array, audioContext: AudioContext) => {
     const pcm16 = new Int16Array(audioData.buffer);
@@ -454,777 +495,723 @@ const App: React.FC = () => {
               return name.includes('female') || name.includes('zira') || name.includes('google us english');
             });
             if (preferredVoice) utterance.voice = preferredVoice;
-            
-            utterance.onend = () => { 
-                setActiveAudioId(null); 
-                setIsLoadingAudio(false); 
-                setAudioProgress(0);
-                setHighlightedWordIndex(-1);
-            };
-            utterance.onerror = (e) => { 
-                console.warn("Native TTS Error", e);
-                setActiveAudioId(null); 
-                setIsLoadingAudio(false); 
+
+            // Simple visual feedback for Native TTS
+            utterance.onstart = () => setIsPaused(false);
+            utterance.onend = () => {
+                setIsPaused(false);
+                setActiveAudioId(null);
             };
             
-            utterance.onboundary = (event) => {
-                if (event.name === 'word') {
-                    const textBefore = cleanText.substring(0, event.charIndex);
-                    const wordCount = textBefore.trim().split(/\s+/).length;
-                    setHighlightedWordIndex(wordCount);
-                    setAudioProgress(event.charIndex / cleanText.length);
-                }
-            };
+            // Basic word estimation for native TTS based on time
+            // Note: 'onboundary' is the proper way but requires exact text matching which is complex with cleaned text
+            // We'll stick to simple playback status for now
             
-            setIsLoadingAudio(false); 
             window.speechSynthesis.speak(utterance);
         } catch (e) {
+            console.error("Native TTS failed", e);
             stopAllAudio();
-            // Silent fail to avoid alert spam
+        } finally {
+            setIsLoadingAudio(false);
         }
     };
 
-    if (!forceGemini && text.length < 150) {
+    if (!forceGemini) {
         playNativeTTS(text);
         return;
     }
 
     try {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (!audioContextRef.current) {
-            audioContextRef.current = new AudioContextClass();
+             audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         }
-        
         if (audioContextRef.current.state === 'suspended') {
-            await audioContextRef.current.resume();
+             await audioContextRef.current.resume();
         }
 
-        const base64Audio = await generateSpeech(text, selectedVoice, isDialogue);
+        const audioData = await generateSpeech(text, selectedVoice, isDialogue);
         
-        if (!base64Audio) throw new Error("Gemini Audio returned empty");
-
-        const binaryString = atob(base64Audio);
-        const len = binaryString.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
+        if (!audioData) {
+            console.warn("Gemini Audio failed, falling back to Native TTS");
+            playNativeTTS(text);
+            return;
         }
 
-        const ctx = audioContextRef.current!;
-        const audioBuffer = decodePCMData(bytes, ctx);
-        
-        const source = ctx.createBufferSource();
+        const audioBuffer = decodePCMData(base64ToBytes(audioData), audioContextRef.current);
+        const source = audioContextRef.current.createBufferSource();
         source.buffer = audioBuffer;
-        source.playbackRate.value = playbackSpeed;
-        source.connect(ctx.destination);
+        source.connect(audioContextRef.current.destination);
         
-        audioSourceRef.current = source;
-        audioStartTimeRef.current = ctx.currentTime;
-        audioDurationRef.current = audioBuffer.duration / playbackSpeed;
-
-        const trackProgress = () => {
-          if (!audioContextRef.current) return;
-          if (!isPaused && audioContextRef.current.state === 'running') {
-            const currentTime = audioContextRef.current.currentTime;
-            const elapsedTime = currentTime - audioStartTimeRef.current;
-            const progress = Math.min(Math.max(elapsedTime / audioDurationRef.current, 0), 1);
-            setAudioProgress(progress);
-            if (progress < 1 && activeAudioId === id) {
-              rafRef.current = requestAnimationFrame(trackProgress);
-            }
-          } else if (isPaused && activeAudioId === id) {
-             rafRef.current = requestAnimationFrame(trackProgress);
-          }
-        };
+        // Handle playback speed
+        source.playbackRate.value = playbackSpeed;
 
         source.onended = () => {
-             if (activeAudioId === id) {
+            if (!isPaused) {
                 setActiveAudioId(null);
-                setIsPaused(false);
-                setAudioProgress(0);
-                if (rafRef.current) cancelAnimationFrame(rafRef.current);
-             }
+                setHighlightedWordIndex(-1);
+            }
         };
+
+        audioSourceRef.current = source;
+        source.start(0);
         
-        source.start();
-        rafRef.current = requestAnimationFrame(trackProgress);
-        setIsLoadingAudio(false);
+        audioStartTimeRef.current = audioContextRef.current.currentTime;
+        audioDurationRef.current = audioBuffer.duration / playbackSpeed;
+
+        // Visual Karaoke loop
+        const animate = () => {
+            if (activeAudioId === id && audioContextRef.current && !isPaused) {
+                const elapsed = (audioContextRef.current.currentTime - audioStartTimeRef.current) * playbackSpeed;
+                const progress = Math.min(elapsed / audioDurationRef.current, 1);
+                setAudioProgress(progress);
+
+                // Word highlighting estimation
+                const plainText = text.replace(/<\/?[^>]+(>|$)/g, " ").replace(/\s+/g, " ").trim();
+                const words = plainText.split(" ");
+                const estimatedIndex = Math.floor(progress * words.length);
+                setHighlightedWordIndex(estimatedIndex);
+
+                rafRef.current = requestAnimationFrame(animate);
+            }
+        };
+        rafRef.current = requestAnimationFrame(animate);
 
     } catch (error) {
-        console.warn("Switching to Native TTS due to API error");
-        playNativeTTS(text);
-    }
-  };
-
-  // QUIZ LOGIC
-  const handleStartQuiz = async () => {
-    const wordList = history.map(h => h.english);
-    if (wordList.length < 5) {
-      alert("Bạn cần ít nhất 5 từ vựng trong kho để tạo bài kiểm tra!");
-      return;
-    }
-    
-    setIsLoadingQuiz(true);
-    try {
-      // Pick random 15 words or fewer
-      const shuffled = wordList.sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, 15);
-      
-      const questions = await generateQuizFromWords(selected);
-      setQuizQuestions(questions);
-      setCurrentQuestionIndex(0);
-      setUserAnswers({});
-      setQuizSubmitted(false);
-      setQuizScore(0);
-      setIsQuizMode(true);
-    } catch (error) {
-      alert("Lỗi khi tạo bài kiểm tra. Vui lòng thử lại.");
+        console.error("Audio Playback Error:", error);
+        playNativeTTS(text); // Ultimate fallback
     } finally {
-      setIsLoadingQuiz(false);
+        setIsLoadingAudio(false);
     }
   };
 
-  const handleQuizAnswer = (option: string) => {
-    if (quizSubmitted) return;
-    setUserAnswers(prev => ({ ...prev, [currentQuestionIndex]: option }));
+  // --- Quiz Logic ---
+  const handleStartQuiz = async () => {
+    if (history.length < 5) {
+        alert("Bạn cần ít nhất 5 từ vựng trong lịch sử để tạo bài kiểm tra!");
+        return;
+    }
+    setIsQuizMode(true);
+    setIsLoadingQuiz(true);
+    setQuizSubmitted(false);
+    setUserAnswers({});
+    setQuizScore(0);
+    
+    // Pick random words
+    const shuffled = [...history].sort(() => 0.5 - Math.random());
+    const selectedWords = shuffled.slice(0, 15).map(i => i.english);
+
+    try {
+        const questions = await generateQuizFromWords(selectedWords);
+        setQuizQuestions(questions);
+    } catch (error) {
+        alert("Không thể tạo bài kiểm tra. Vui lòng thử lại.");
+        setIsQuizMode(false);
+    } finally {
+        setIsLoadingQuiz(false);
+    }
   };
 
-  const handleNextQuestion = () => {
-    if (currentQuestionIndex < quizQuestions.length - 1) {
-      setCurrentQuestionIndex(prev => prev + 1);
-    }
-  };
-  
-  const handlePrevQuestion = () => {
-    if (currentQuestionIndex > 0) {
-        setCurrentQuestionIndex(prev => prev - 1);
-    }
+  const handleQuizAnswer = (questionId: number, answer: string) => {
+      if (quizSubmitted) return;
+      setUserAnswers(prev => ({ ...prev, [questionId]: answer }));
   };
 
   const handleSubmitQuiz = () => {
-    let correctCount = 0;
-    quizQuestions.forEach((q, idx) => {
-      if (userAnswers[idx] === q.correctAnswer) {
-        correctCount++;
-      }
-    });
-    const score = (correctCount / quizQuestions.length) * 10;
-    setQuizScore(score);
-    setQuizSubmitted(true);
+      let correctCount = 0;
+      quizQuestions.forEach(q => {
+          if (userAnswers[q.id] === q.correctAnswer) correctCount++;
+      });
+      const score = Math.round((correctCount / quizQuestions.length) * 10);
+      setQuizScore(score);
+      setQuizSubmitted(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleExitQuiz = () => {
-    if (window.confirm("Thoát bài kiểm tra?")) {
       setIsQuizMode(false);
       setQuizQuestions([]);
-    }
+      setUserAnswers({});
   };
-
-  // --- UI COMPONENTS ---
-
-  const InteractiveStoryText = ({ content, storyId }: { content: string, storyId: string }) => {
-    const isActive = activeAudioId === storyId;
-    const plainText = content.replace(/<\/?[^>]+(>|$)/g, " ");
-    const allWords = plainText.trim().split(/\s+/).filter(w => w.length > 0);
-    const totalWords = allWords.length;
-    
-    let currentWordIndex = -1;
-    if (isActive) {
-        if (highlightedWordIndex > -1) {
-            currentWordIndex = highlightedWordIndex;
-        } else {
-            currentWordIndex = Math.floor(audioProgress * totalWords);
-        }
-    }
-
-    let globalWordCounter = 0;
-    const parts = content.split(/(<b>.*?<\/b>)/g);
-
-    return (
-      <div className="leading-loose whitespace-pre-wrap font-medium">
-        {parts.map((part, index) => {
-          if (part.startsWith('<b>') && part.endsWith('</b>')) {
-            const innerText = part.replace(/<\/?b>/g, '');
-            const isHighlighted = isActive && globalWordCounter === currentWordIndex;
-            globalWordCounter++;
-
-            return (
-              <span 
-                key={index} 
-                onClick={(e) => handleWordClick(innerText, content, e)}
-                className={`font-extrabold cursor-pointer px-1.5 py-0.5 rounded transition-all shadow-[0_0_12px_rgba(245,158,11,0.3)] border mx-0.5
-                    ${isHighlighted 
-                        ? 'bg-yellow-400 text-black scale-110 border-yellow-500 z-10' 
-                        : 'text-amber-300 bg-amber-500/20 hover:bg-amber-500/40 border-amber-500/30'}`}
-              >
-                {innerText}
-              </span>
-            );
-          } else {
-            return (
-              <span key={index}>
-                {part.split(/(\s+)/).map((token, wIndex) => {
-                  if (token.trim().length === 0) return token;
-                  const isHighlighted = isActive && globalWordCounter === currentWordIndex;
-                  globalWordCounter++;
-                  return (
-                    <span 
-                      key={`${index}-${wIndex}`}
-                      onClick={(e) => handleWordClick(token, content, e)}
-                      className={`cursor-pointer transition-colors px-0.5 rounded
-                        ${isHighlighted 
-                            ? 'bg-yellow-400/80 text-black font-bold' 
-                            : 'hover:underline hover:text-indigo-200'}`}
-                    >
-                      {token}
-                    </span>
-                  );
-                })}
-              </span>
-            );
-          }
-        })}
-      </div>
-    );
-  };
-
-  const SpeedSelector = ({ theme = 'light' }: { theme?: 'light' | 'dark' }) => {
-    const bgClass = theme === 'dark' ? 'bg-white/10 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-100';
-    const accentClass = theme === 'dark' ? 'accent-green-400' : 'accent-indigo-500';
-
-    return (
-      <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${bgClass} transition-colors`} onClick={(e) => e.stopPropagation()}>
-        <span className="text-[10px] font-bold uppercase tracking-wider min-w-[30px] text-center">
-          {playbackSpeed.toFixed(1)}x
-        </span>
-        <input 
-          type="range"
-          min="0.5"
-          max="2.0"
-          step="0.1"
-          value={playbackSpeed}
-          onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-          className={`w-20 h-1.5 bg-gray-300/50 rounded-lg appearance-none cursor-pointer ${accentClass}`}
-        />
-      </div>
-    );
-  };
-
-  const VoiceSelector = ({ theme = 'light' }: { theme?: 'light' | 'dark' }) => {
-    const bgClass = theme === 'dark' ? 'bg-white/10 text-white border-white/20' : 'bg-indigo-50 text-indigo-700 border-indigo-100';
-    return (
-      <div className="relative inline-block" onClick={e => e.stopPropagation()}>
-        <select
-          value={selectedVoice}
-          onChange={(e) => setSelectedVoice(e.target.value)}
-          className={`appearance-none cursor-pointer pl-3 pr-8 py-1.5 text-xs font-bold rounded-full border focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all ${bgClass}`}
-        >
-          {VOICE_OPTIONS.map(voice => (
-            <option key={voice.id} value={voice.id} className="text-gray-900 bg-white">
-              {voice.label}
-            </option>
-          ))}
-        </select>
-        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-current opacity-70">
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-        </div>
-      </div>
-    );
-  };
-  
-  // MAIN RENDER FOR QUIZ MODE
-  if (isQuizMode) {
-      return (
-          <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-              <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                  <div className="bg-indigo-600 p-6 text-white flex justify-between items-center">
-                      <div>
-                          <h2 className="text-2xl font-bold flex items-center gap-2"><ClipboardDocumentCheckIcon className="w-6 h-6" /> Bài Kiểm Tra Từ Vựng</h2>
-                          <p className="text-indigo-200 text-sm mt-1">Câu {currentQuestionIndex + 1} / {quizQuestions.length}</p>
-                      </div>
-                      {!quizSubmitted && (
-                          <button onClick={handleExitQuiz} className="bg-white/20 hover:bg-white/30 p-2 rounded-full"><XMarkIcon className="w-5 h-5" /></button>
-                      )}
-                  </div>
-                  
-                  <div className="p-8 flex-grow overflow-y-auto">
-                      {!quizSubmitted ? (
-                          <>
-                              <h3 className="text-xl font-semibold text-gray-800 mb-6 leading-relaxed">{quizQuestions[currentQuestionIndex]?.question}</h3>
-                              <div className="space-y-3">
-                                  {quizQuestions[currentQuestionIndex]?.options.map((option, idx) => (
-                                      <button
-                                          key={idx}
-                                          onClick={() => handleQuizAnswer(option)}
-                                          className={`w-full text-left p-4 rounded-xl border-2 transition-all flex items-center gap-3
-                                              ${userAnswers[currentQuestionIndex] === option 
-                                                  ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold shadow-md' 
-                                                  : 'border-gray-200 hover:border-indigo-300 hover:bg-gray-50 text-gray-700'}`}
-                                      >
-                                          <span className="w-8 h-8 rounded-full bg-white border border-gray-300 flex items-center justify-center text-sm font-bold shadow-sm">
-                                              {String.fromCharCode(65 + idx)}
-                                          </span>
-                                          {option}
-                                      </button>
-                                  ))}
-                              </div>
-                          </>
-                      ) : (
-                          <div className="text-center animate-fade-in">
-                              <div className="inline-block p-6 rounded-full bg-indigo-50 mb-4">
-                                  <span className="text-4xl font-black text-indigo-600">{quizScore.toFixed(1)}</span>
-                                  <span className="text-gray-400 text-lg">/10</span>
-                              </div>
-                              <h3 className="text-2xl font-bold text-gray-900 mb-2">Kết Quả Bài Thi</h3>
-                              <p className="text-gray-500 mb-8">Bạn đã trả lời đúng {Object.keys(userAnswers).filter(k => userAnswers[parseInt(k)] === quizQuestions[parseInt(k)].correctAnswer).length} / {quizQuestions.length} câu.</p>
-                              
-                              <div className="space-y-6 text-left">
-                                  {quizQuestions.map((q, idx) => {
-                                      const isCorrect = userAnswers[idx] === q.correctAnswer;
-                                      return (
-                                          <div key={idx} className={`p-4 rounded-xl border ${isCorrect ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-                                              <p className="font-semibold text-gray-800 mb-2">Câu {idx + 1}: {q.question}</p>
-                                              <div className="flex flex-col gap-1 text-sm">
-                                                  <div className="flex items-center gap-2">
-                                                      {isCorrect ? <CheckCircleIcon className="w-4 h-4 text-green-600" /> : <XCircleIcon className="w-4 h-4 text-red-600" />}
-                                                      <span className={isCorrect ? "text-green-700" : "text-red-700"}>Bạn chọn: {userAnswers[idx] || "Không trả lời"}</span>
-                                                  </div>
-                                                  {!isCorrect && (
-                                                      <div className="flex items-center gap-2 text-green-700 font-medium">
-                                                          <CheckCircleIcon className="w-4 h-4" />
-                                                          <span>Đáp án đúng: {q.correctAnswer}</span>
-                                                      </div>
-                                                  )}
-                                                  <p className="text-gray-500 text-xs mt-1 italic">{q.explanation}</p>
-                                              </div>
-                                          </div>
-                                      );
-                                  })}
-                              </div>
-                          </div>
-                      )}
-                  </div>
-                  
-                  <div className="bg-gray-50 p-6 border-t border-gray-200 flex justify-between items-center">
-                      {!quizSubmitted ? (
-                          <>
-                            <button 
-                                onClick={handlePrevQuestion}
-                                disabled={currentQuestionIndex === 0}
-                                className="px-6 py-2 rounded-lg text-gray-500 hover:bg-gray-200 disabled:opacity-50 font-medium transition-colors"
-                            >
-                                Quay lại
-                            </button>
-                            {currentQuestionIndex < quizQuestions.length - 1 ? (
-                                <button 
-                                    onClick={handleNextQuestion}
-                                    className="px-8 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95"
-                                >
-                                    Câu tiếp theo
-                                </button>
-                            ) : (
-                                <button 
-                                    onClick={handleSubmitQuiz}
-                                    className="px-8 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold shadow-lg shadow-green-200 transition-all active:scale-95"
-                                >
-                                    Nộp Bài
-                                </button>
-                            )}
-                          </>
-                      ) : (
-                          <button 
-                              onClick={() => { setIsQuizMode(false); setQuizQuestions([]); }}
-                              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all"
-                          >
-                              Quay Về Trang Chủ
-                          </button>
-                      )}
-                  </div>
-              </div>
-          </div>
-      );
-  }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 pb-12 relative">
-      <header className="bg-white shadow-sm sticky top-0 z-20">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-gray-50 text-gray-800 pb-20">
+      {/* Header */}
+      <header className="bg-white shadow-sm sticky top-0 z-40">
+        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="bg-indigo-600 p-2 rounded-lg">
-              <BookOpenIcon className="w-6 h-6 text-white" />
-            </div>
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">VocaStory AI</h1>
+            <BookOpenIcon className="w-8 h-8 text-blue-600" />
+            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">VocaStory AI</h1>
           </div>
-          <button onClick={handleClearHistory} className="text-gray-400 hover:text-red-500 transition-colors">
-            <TrashIcon className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <ClockIcon className="w-4 h-4" />
+            <span>{Math.round(progressPercent)}% hồi phục</span>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 hidden md:block">
-            <button 
-              onClick={handleToggleDirection}
-              className="bg-white p-2 rounded-full shadow-lg border border-gray-100 text-indigo-600 hover:bg-indigo-50 transition-colors"
-            >
-              <ArrowsRightLeftIcon className="w-5 h-5" />
-            </button>
-          </div>
+      <main className="max-w-3xl mx-auto px-4 py-6 space-y-8">
+        
+        {/* Quiz Mode View */}
+        {isQuizMode ? (
+            <div className="bg-white rounded-2xl shadow-lg p-6 animate-fade-in">
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                        <ClipboardDocumentCheckIcon className="w-6 h-6 text-blue-500" />
+                        Kiểm Tra Từ Vựng
+                    </h2>
+                    <button onClick={handleExitQuiz} className="text-gray-500 hover:text-gray-700">
+                        <XMarkIcon className="w-6 h-6" />
+                    </button>
+                </div>
 
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col h-full relative" ref={searchContainerRef}>
-            <div className="flex justify-between items-center mb-2">
-                <label className="text-sm font-semibold text-gray-500 flex items-center gap-2">
-                    <LanguageIcon className="w-4 h-4" />
-                    {direction === 'vi_en' ? 'Tiếng Việt' : 'Tiếng Anh'}
-                </label>
-                <button onClick={handleToggleDirection} className="md:hidden bg-gray-100 p-1.5 rounded-full text-indigo-600">
-                    <ArrowsRightLeftIcon className="w-4 h-4" />
-                </button>
-            </div>
-            <div className="relative flex-grow">
-                <textarea
-                  className="w-full h-full p-4 bg-gray-50 rounded-xl border-transparent focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-all resize-none text-lg outline-none"
-                  placeholder={direction === 'vi_en' ? "Nhập tiếng Việt..." : "Enter English text..."}
-                  rows={5}
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !showSuggestions) handleTranslate();
-                  }}
-                />
-                
-                {showSuggestions && suggestions.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-30 max-h-60 overflow-y-auto animate-fade-in">
-                      {suggestions.map((suggestion, idx) => (
-                          <div 
-                             key={idx}
-                             onClick={() => handleDropdownSelect(suggestion)}
-                             className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-gray-50 last:border-none flex justify-between items-center"
-                          >
-                             <div className="flex flex-col">
-                                <span className="font-bold text-gray-800">{suggestion.word}</span>
-                                <span className="text-xs text-gray-500">{suggestion.meaning}</span>
-                             </div>
-                             <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold uppercase">
-                                {suggestion.type}
-                             </span>
-                          </div>
-                      ))}
-                  </div>
+                {isLoadingQuiz ? (
+                    <div className="py-20 text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                        <p className="text-gray-600">AI đang soạn đề thi cho bạn...</p>
+                    </div>
+                ) : (
+                    <div className="space-y-8">
+                        {quizSubmitted && (
+                            <div className={`p-4 rounded-xl text-center ${quizScore >= 8 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                <p className="text-lg font-bold">Kết quả: {quizScore}/10 điểm</p>
+                                <p className="text-sm">{quizScore >= 8 ? "Tuyệt vời! Bạn nắm rất chắc từ vựng." : "Hãy ôn tập thêm nhé!"}</p>
+                            </div>
+                        )}
+
+                        {quizQuestions.map((q, index) => (
+                            <div key={q.id} className="bg-gray-50 p-4 rounded-xl">
+                                <p className="font-semibold text-gray-800 mb-3">Câu {index + 1}: {q.question}</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {q.options.map((opt) => {
+                                        let btnClass = "p-3 rounded-lg border text-left transition-all ";
+                                        if (quizSubmitted) {
+                                            if (opt === q.correctAnswer) btnClass += "bg-green-100 border-green-500 text-green-700 ";
+                                            else if (userAnswers[q.id] === opt) btnClass += "bg-red-100 border-red-500 text-red-700 ";
+                                            else btnClass += "border-gray-200 opacity-50 ";
+                                        } else {
+                                            btnClass += userAnswers[q.id] === opt ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-200 hover:bg-gray-100";
+                                        }
+
+                                        return (
+                                            <button 
+                                                key={opt}
+                                                disabled={quizSubmitted}
+                                                onClick={() => handleQuizAnswer(q.id, opt)}
+                                                className={btnClass}
+                                            >
+                                                {opt}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                {quizSubmitted && (
+                                    <div className="mt-3 text-sm text-gray-600 italic">
+                                        💡 Giải thích: {q.explanation}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+
+                        {!quizSubmitted && (
+                            <button 
+                                onClick={handleSubmitQuiz}
+                                className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold text-lg hover:shadow-lg transition-all"
+                            >
+                                Nộp Bài
+                            </button>
+                        )}
+                    </div>
                 )}
+            </div>
+        ) : (
+        <>
+            {/* Translation Section */}
+            <section className="bg-white rounded-2xl shadow-lg p-6 relative" ref={searchContainerRef}>
+            <div className="flex items-center gap-2 mb-4">
+                <LanguageIcon className="w-5 h-5 text-indigo-500" />
+                <h2 className="font-semibold text-gray-700">Tra cứu nhanh</h2>
             </div>
             
-            <div className="mt-3 overflow-x-auto pb-1 scrollbar-hide">
-               <div className="flex gap-2">
-                 {QUICK_SUGGESTIONS[direction].map((suggestion, idx) => (
-                   <button
-                     key={idx}
-                     onClick={() => handleSuggestionClick(suggestion)}
-                     className="whitespace-nowrap px-3 py-1.5 bg-gray-100 hover:bg-indigo-100 text-gray-600 hover:text-indigo-700 rounded-full text-xs font-medium transition-colors border border-gray-200"
-                   >
-                     {suggestion}
-                   </button>
-                 ))}
-               </div>
-            </div>
-
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={handleTranslate}
-                disabled={isLoadingTranslate || !inputText.trim()}
-                className={`px-6 py-2.5 rounded-xl font-medium text-white shadow-lg shadow-indigo-200 transition-all transform active:scale-95 flex items-center gap-2
-                  ${isLoadingTranslate || !inputText.trim() 
-                    ? 'bg-gray-300 cursor-not-allowed shadow-none' 
-                    : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-300'}`}
-              >
-                {isLoadingTranslate ? (
-                  <><ArrowPathIcon className="w-4 h-4 animate-spin" /> Đang dịch...</>
-                ) : (
-                  direction === 'vi_en' ? 'Dịch sang Anh' : 'Dịch sang Việt'
-                )}
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col h-full relative overflow-hidden">
-            <label className="text-sm font-semibold text-gray-500 mb-2 flex items-center gap-2">
-              <SparklesIcon className="w-4 h-4 text-indigo-500" />
-              {direction === 'vi_en' ? 'Tiếng Anh' : 'Tiếng Việt'}
-            </label>
-            <div className="flex-grow flex items-center justify-center p-4 bg-indigo-50 rounded-xl border border-indigo-100 min-h-[140px]">
-              {translatedResult ? (
-                <div className="w-full text-center animate-fade-in flex flex-col items-center">
-                  <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-3 mb-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <p className="text-xl md:text-3xl font-bold text-indigo-900 break-words">
-                        {translatedResult.english}
-                      </p>
-                      
-                      <button 
-                        onClick={() => {
-                            const textToRead = direction === 'vi_en' ? translatedResult.english : inputText;
-                            handleAudioToggle('translate_res', textToRead);
-                        }}
-                        disabled={isLoadingAudio && activeAudioId === 'translate_res'}
-                        className={`p-2 rounded-full transition-all shadow-sm ${activeAudioId === 'translate_res' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-100'}`}
-                      >
-                         {activeAudioId === 'translate_res' && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
-                      </button>
-                    </div>
-
-                    {translatedResult.phonetic && (
-                      <span className="text-sm font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded border border-gray-200">
-                        {translatedResult.phonetic}
-                      </span>
-                    )}
-                    {translatedResult.partOfSpeech && (
-                      <span className="text-xs font-semibold uppercase tracking-wide bg-indigo-200 text-indigo-800 px-2 py-1 rounded-md">
-                        {translatedResult.partOfSpeech}
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="mb-4 flex items-center gap-2 justify-center flex-wrap">
-                     <VoiceSelector theme="light" />
-                     <SpeedSelector theme="light" />
-                  </div>
-
-                  {translatedResult.usageHint && (
-                    <div className="mt-2 text-sm text-indigo-600 bg-white/50 px-4 py-2 rounded-lg italic inline-block max-w-[90%] border border-indigo-100/50">
-                      💡 {translatedResult.usageHint}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <p className="text-gray-400 text-center text-sm">Kết quả dịch sẽ hiện ở đây</p>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-900">Kho Từ Vựng Của Bạn</h2>
-            <div className="flex gap-3 items-center">
-                <button 
-                    onClick={handleStartQuiz}
-                    disabled={isLoadingQuiz || history.length < 5}
-                    className="flex items-center gap-1.5 text-xs font-bold bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1.5 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {isLoadingQuiz ? <ArrowPathIcon className="w-3.5 h-3.5 animate-spin" /> : <ClipboardDocumentCheckIcon className="w-3.5 h-3.5" />}
-                    Tạo Bài Kiểm Tra
-                </button>
-                <span className="text-sm text-gray-500 bg-gray-200 px-2 py-1 rounded-md">{history.length} từ</span>
-            </div>
-          </div>
-          
-          {groupedHistory.length === 0 ? (
-            <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-gray-300 text-gray-400">
-              Chưa có từ vựng nào. Hãy bắt đầu tra cứu!
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {groupedHistory.map(group => (
-                <div key={group.dateLabel} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                  <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2 border-b border-gray-100 pb-2">
-                    <ClockIcon className="w-4 h-4 text-indigo-400" />
-                    {group.dateLabel}
-                  </h3>
-                  <div className="flex flex-wrap gap-3">
-                    {group.items.map((item) => (
-                      <div 
-                        key={item.id} 
-                        onClick={() => handleAudioToggle(item.id, item.english)}
-                        className={`group relative flex flex-col bg-gray-50 hover:bg-indigo-50 border px-4 py-2 rounded-xl transition-all min-w-[140px] max-w-[240px] cursor-pointer active:scale-95 ${activeAudioId === item.id ? 'border-indigo-400 ring-1 ring-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200'}`}
-                      >
-                        <button 
-                          onClick={(e) => handleDeleteWord(item.id, e)}
-                          className="absolute -top-1.5 -right-1.5 p-1 rounded-full bg-red-100 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm border border-red-200 hover:bg-red-200 z-10"
-                        >
-                          <XMarkIcon className="w-3 h-3" />
-                        </button>
-                        <div className="flex justify-between items-start mb-1">
-                          <span className="font-semibold text-indigo-700 truncate mr-2 flex items-center gap-1">
-                            {item.english}
-                            {activeAudioId === item.id && !isPaused ? <PauseIcon className="w-3 h-3 text-indigo-500" /> : <SpeakerWaveIcon className="w-3 h-3 text-indigo-300 opacity-0 group-hover:opacity-100" />}
-                          </span>
-                          {item.partOfSpeech && (
-                            <span className="text-[10px] uppercase font-bold text-indigo-400 bg-indigo-100 px-1.5 py-0.5 rounded">
-                              {item.partOfSpeech.substring(0, 4)}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-xs text-gray-500 truncate" title={item.vietnamese}>{item.vietnamese}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="bg-gradient-to-br from-indigo-900 to-purple-900 rounded-3xl p-6 md:p-8 text-white shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-white opacity-5"></div>
-          <div className="absolute bottom-0 left-0 -ml-10 -mb-10 w-40 h-40 rounded-full bg-white opacity-5"></div>
-
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-1 space-y-6">
-              <div>
-                <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
-                  <BookOpenIcon className="w-6 h-6" />
-                  Ôn Tập Qua Truyện
-                </h2>
-                <p className="text-indigo-200 text-sm">Hệ thống tạo truyện/hội thoại song ngữ mỗi 10 tiếng.</p>
-              </div>
-
-              <div className="bg-white/10 backdrop-blur-sm p-4 rounded-xl border border-white/10">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-indigo-100 flex items-center gap-1">
-                    <ClockIcon className="w-4 h-4" />
-                    Thời gian hồi
-                  </span>
-                  <span className="text-xs text-indigo-200">
-                    {isReadyForStory ? 'Sẵn sàng!' : `${Math.floor((TEN_HOURS_MS - timeSinceLastGen) / (1000 * 60 * 60))}h nữa`}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-700/50 rounded-full h-2">
-                  <div className={`h-2 rounded-full transition-all duration-1000 ${isReadyForStory ? 'bg-green-400' : 'bg-indigo-400'}`} style={{ width: `${progressPercent}%` }}></div>
-                </div>
-              </div>
-
-              <div className="flex gap-2 p-1 bg-white/10 rounded-xl">
-                 <button onClick={() => setStoryType('story')} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${storyType === 'story' ? 'bg-white text-indigo-900 shadow-md' : 'text-indigo-200 hover:text-white'}`}>📖 Truyện Ngắn</button>
-                 <button onClick={() => setStoryType('dialogue')} className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${storyType === 'dialogue' ? 'bg-white text-indigo-900 shadow-md' : 'text-indigo-200 hover:text-white'}`}>💬 Hội Thoại</button>
-              </div>
-
-              <div className="space-y-3">
-                <input 
-                  type="text" 
-                  value={storyTheme}
-                  onChange={(e) => setStoryTheme(e.target.value)}
-                  placeholder="Chủ đề (VD: Adventure)..."
-                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-sm text-white placeholder-indigo-300 focus:outline-none focus:ring-2 focus:ring-white/30"
-                />
-                
-                <div className="flex flex-wrap gap-2">
-                   {SUGGESTED_THEMES.map(theme => (
-                     <button key={theme} onClick={() => setStoryTheme(theme)} className="text-[10px] sm:text-xs bg-indigo-500/30 hover:bg-indigo-500/50 border border-indigo-400/30 text-indigo-100 px-2 py-1 rounded-full transition-colors">{theme}</button>
-                   ))}
-                </div>
-
-                <button
-                  onClick={() => handleGenerateStory(true)} 
-                  disabled={isLoadingStory || history.length < 2}
-                  className="w-full py-3 bg-white text-indigo-900 rounded-xl font-bold shadow-lg hover:bg-indigo-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 mt-4"
-                >
-                  {isLoadingStory ? <ArrowPathIcon className="w-5 h-5 animate-spin" /> : <SparklesIcon className="w-5 h-5" />}
-                  {isReadyForStory ? 'Tạo Nội Dung Ngay' : 'Tạo Ngay (Bỏ qua chờ)'}
-                </button>
-              </div>
-            </div>
-
-            <div className="lg:col-span-2 bg-white/5 rounded-2xl border border-white/10 p-6 max-h-[700px] overflow-y-auto custom-scrollbar flex flex-col gap-6">
-              {stories.length > 0 ? (
-                <div className="space-y-8">
-                  {stories.map((story, index) => (
-                    <div key={story.id} className="animate-fade-in group">
-                      <div className="flex flex-wrap items-center justify-between mb-4 border-b border-white/10 pb-2 gap-2">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium uppercase tracking-wider text-indigo-300 bg-indigo-900/50 px-2 py-1 rounded">{story.theme}</span>
-                            <span className="text-xs text-indigo-300">{new Date(story.timestamp).toLocaleDateString()}</span>
-                            {story.generationTimeMs && (
-                              <span className="text-xs text-indigo-300 flex items-center gap-1 border-l border-white/20 pl-2">⚡ {(story.generationTimeMs / 1000).toFixed(1)}s</span>
+            <div className="relative">
+                <div className="flex flex-col md:flex-row gap-4">
+                    <div className="flex-1">
+                        <div className="relative">
+                            <input
+                                type="text"
+                                className="w-full p-4 pr-10 rounded-xl border border-gray-200 bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all text-lg"
+                                placeholder={direction === 'vi_en' ? "Nhập tiếng Việt..." : "Type in English..."}
+                                value={inputText}
+                                onChange={(e) => setInputText(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleTranslate()}
+                            />
+                            {inputText && (
+                                <button 
+                                    onClick={() => { setInputText(''); setSuggestions([]); }}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                >
+                                    <XMarkIcon className="w-5 h-5" />
+                                </button>
+                            )}
+                            
+                            {/* Suggestions Dropdown */}
+                            {showSuggestions && suggestions.length > 0 && (
+                                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+                                    {suggestions.map((item, idx) => (
+                                        <div 
+                                            key={idx}
+                                            onClick={() => handleDropdownSelect(item)}
+                                            className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-gray-50 last:border-0 flex justify-between items-center group"
+                                        >
+                                            <div>
+                                                <span className="font-medium text-gray-800">{item.word}</span>
+                                                <span className="text-xs text-gray-400 ml-2 border border-gray-200 rounded px-1">{item.type}</span>
+                                            </div>
+                                            <span className="text-sm text-gray-500 group-hover:text-indigo-600">{item.meaning}</span>
+                                        </div>
+                                    ))}
+                                </div>
                             )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-2 bg-white/10 rounded-lg px-2 py-1">
-                            <VoiceSelector theme="dark" />
-                            <div className="h-4 w-[1px] bg-white/20"></div>
-                            <SpeedSelector theme="dark" />
-                            <div className="h-4 w-[1px] bg-white/20"></div>
-                            <button 
-                              onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
-                              disabled={isLoadingAudio && activeAudioId === story.id}
-                              className={`text-xs p-1.5 rounded transition-colors flex items-center gap-1 ${activeAudioId === story.id ? 'bg-white text-indigo-900 font-bold' : 'hover:bg-white/20 text-white'}`}
-                            >
-                              {activeAudioId === story.id ? (isLoadingAudio ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : (isPaused ? <SpeakerWaveIcon className="w-4 h-4" /> : <PauseIcon className="w-4 h-4" />)) : <SpeakerWaveIcon className="w-4 h-4" />}
-                            </button>
-                          </div>
-                          <button onClick={() => toggleVietnamese(story.id)} className="text-xs bg-white/10 hover:bg-white/20 px-2 py-1.5 rounded text-indigo-100 transition-colors flex items-center gap-1 h-[34px]"><LanguageIcon className="w-3.5 h-3.5" /> {showVietnamese[story.id] ? 'Ẩn' : 'Dịch'}</button>
-                          <button onClick={() => handleDeleteStory(story.id)} className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 px-2 py-1.5 rounded transition-colors h-[34px]"><TrashIcon className="w-3.5 h-3.5" /></button>
-                        </div>
-                      </div>
-                      
-                      <div className="prose prose-invert prose-lg max-w-none text-indigo-50 mb-6">
-                         <InteractiveStoryText content={story.content} storyId={story.id} />
-                      </div>
-
-                      {showVietnamese[story.id] && (
-                        <div className="bg-indigo-950/50 p-4 rounded-xl border border-indigo-500/20 animate-fade-in mb-6">
-                          <h4 className="text-xs font-bold text-indigo-300 uppercase mb-2">Bản dịch tiếng việt</h4>
-                          <p className="text-indigo-200 text-sm leading-relaxed whitespace-pre-line">{story.vietnameseContent}</p>
-                        </div>
-                      )}
-                      
-                      {story.grammarPoints && story.grammarPoints.length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-white/10">
-                           {!showGrammar[story.id] ? (
-                             <button onClick={() => toggleGrammar(story.id)} className="w-full flex items-center justify-center gap-2 py-3 bg-teal-900/30 hover:bg-teal-900/50 text-teal-300 rounded-xl border border-teal-500/20 transition-all font-semibold text-sm"><AcademicCapIcon className="w-5 h-5" /> 🔍 Xem Phân Tích Ngữ Pháp</button>
-                           ) : (
-                             <div className="animate-fade-in bg-teal-950/30 rounded-xl p-1 border border-teal-500/20">
-                                <button onClick={() => toggleGrammar(story.id)} className="w-full text-center py-2 text-xs text-teal-500/70 hover:text-teal-400 mb-2 uppercase tracking-wide font-bold">Ẩn phân tích</button>
-                                <div className="px-4 pb-4 grid grid-cols-1 gap-4">
-                                  {story.grammarPoints.map((point, gIndex) => (
-                                    <div key={gIndex} className="bg-teal-900/40 rounded-xl p-4 border border-teal-500/20 hover:bg-teal-900/60 transition-colors">
-                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2 gap-1">
-                                        <h5 className="font-bold text-teal-200 text-sm">{point.structure}</h5>
-                                        <span className="text-[10px] bg-teal-500/10 text-teal-300 px-2 py-0.5 rounded border border-teal-500/10">Cấu trúc</span>
-                                      </div>
-                                      <p className="text-xs text-gray-300 mb-3 leading-relaxed">{point.explanation}</p>
-                                      <div className="space-y-2">
-                                          <div className="bg-black/20 rounded-lg px-3 py-2 border-l-2 border-teal-500/50"><p className="text-xs italic text-teal-100">"{point.exampleInStory}"</p></div>
-                                          <div className="flex items-start gap-1.5 text-xs text-green-300/90"><span className="mt-0.5">💡</span><span>{point.memoryTip}</span></div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                             </div>
-                           )}
-                        </div>
-                      )}
-                      {index < stories.length - 1 && <div className="my-8 border-b border-white/5"></div>}
                     </div>
-                  ))}
+
+                    <button 
+                        onClick={handleToggleDirection}
+                        className="self-center p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+                        title="Đổi chiều dịch"
+                    >
+                        <ArrowsRightLeftIcon className="w-6 h-6" />
+                    </button>
+
+                    <button
+                        className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[120px]"
+                        onClick={handleTranslate}
+                        disabled={isLoadingTranslate || !inputText.trim()}
+                    >
+                        {isLoadingTranslate ? (
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                        ) : (
+                        "Dịch ngay"
+                        )}
+                    </button>
                 </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-indigo-300 opacity-60 min-h-[300px]">
-                  <BookOpenIcon className="w-12 h-12 mb-4" />
-                  <p>Chưa có câu chuyện nào được tạo.</p>
+                
+                {/* Quick Suggestions */}
+                <div className="mt-4 flex flex-wrap gap-2">
+                    {QUICK_SUGGESTIONS[direction].map((text, i) => (
+                        <button 
+                            key={i} 
+                            onClick={() => handleSuggestionClick(text)}
+                            className="text-xs bg-gray-100 hover:bg-indigo-50 text-gray-600 hover:text-indigo-600 px-3 py-1.5 rounded-full transition-colors border border-transparent hover:border-indigo-100"
+                        >
+                            {text}
+                        </button>
+                    ))}
                 </div>
-              )}
             </div>
-          </div>
-        </section>
+
+            {translatedResult && (
+                <div className="mt-6 p-6 bg-indigo-50 rounded-xl border border-indigo-100 animate-fade-in relative group">
+                <div className="flex justify-between items-start mb-2">
+                    <div>
+                        <div className="flex items-baseline gap-3">
+                            <h3 className="text-2xl font-bold text-gray-800">{translatedResult.english}</h3>
+                            <span className="text-sm font-mono text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
+                                /{translatedResult.phonetic}/
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs font-semibold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">
+                                {translatedResult.partOfSpeech}
+                            </span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 bg-white rounded-lg p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                             <input 
+                                type="range" 
+                                min="0.7" 
+                                max="1.3" 
+                                step="0.1"
+                                value={playbackSpeed}
+                                onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+                                className="w-16 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                title={`Tốc độ: ${playbackSpeed}x`}
+                             />
+                             <span className="text-[10px] w-6 text-center text-gray-500">{playbackSpeed}x</span>
+                        </div>
+                        <button 
+                            onClick={() => handleAudioToggle('translate', translatedResult.sourceEnglish || translatedResult.english)}
+                            className={`p-2 rounded-full transition-colors ${
+                                activeAudioId === 'translate' 
+                                ? 'bg-indigo-600 text-white shadow-md' 
+                                : 'bg-white text-gray-600 hover:bg-gray-100'
+                            }`}
+                        >
+                            {activeAudioId === 'translate' && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
+                        </button>
+                    </div>
+                </div>
+                
+                <div className="text-gray-600 italic mt-3 border-t border-indigo-100 pt-3 flex items-start gap-2">
+                    <SparklesIcon className="w-4 h-4 text-amber-500 mt-1 flex-shrink-0" />
+                    <span className="flex-1">{translatedResult.usageHint}</span>
+                    <button
+                         onClick={() => handleAudioToggle('hint', translatedResult.usageHint)}
+                         className={`p-1.5 rounded-full transition-colors flex-shrink-0 ${
+                             activeAudioId === 'hint' 
+                             ? 'bg-amber-100 text-amber-600' 
+                             : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'
+                         }`}
+                         title="Nghe ví dụ"
+                     >
+                         {activeAudioId === 'hint' && !isPaused ? <PauseIcon className="w-4 h-4" /> : <SpeakerWaveIcon className="w-4 h-4" />}
+                     </button>
+                </div>
+                </div>
+            )}
+            </section>
+
+            {/* Vocabulary List */}
+            <section>
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                <ClockIcon className="w-5 h-5 text-orange-500" />
+                <h2 className="font-semibold text-gray-700">Kho từ vựng của bạn</h2>
+                <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">
+                    {history.length}
+                </span>
+                </div>
+                <div className="flex gap-2">
+                     <button 
+                        onClick={handleStartQuiz}
+                        className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors"
+                     >
+                        <ClipboardDocumentCheckIcon className="w-4 h-4" />
+                        Tạo Bài Kiểm Tra
+                    </button>
+                    <button 
+                        onClick={handleClearHistory}
+                        className="text-xs flex items-center gap-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                        <TrashIcon className="w-4 h-4" />
+                        Xóa lịch sử
+                    </button>
+                </div>
+            </div>
+
+            <div className="space-y-6">
+                {groupedHistory.map((group, groupIdx) => (
+                    <div key={groupIdx}>
+                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 ml-1">{group.dateLabel}</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {group.items.map((item) => (
+                                <div 
+                                    key={item.id} 
+                                    className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group relative active:scale-[0.98]"
+                                    onClick={() => handleAudioToggle(item.id, item.english, false)}
+                                >
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <p className="font-bold text-gray-800">{item.english}</p>
+                                            <p className="text-sm text-gray-500 mt-0.5">{item.vietnamese}</p>
+                                        </div>
+                                        <div className="flex flex-col items-end gap-1">
+                                            {item.partOfSpeech && (
+                                                <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">
+                                                    {item.partOfSpeech}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    {/* Delete Button */}
+                                    <button
+                                        onClick={(e) => handleDeleteWord(item.id, e)}
+                                        className="absolute -top-2 -right-2 bg-red-100 text-red-500 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-200"
+                                    >
+                                        <XMarkIcon className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+                {history.length === 0 && (
+                    <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
+                        <BookOpenIcon className="w-12 h-12 mx-auto mb-2 opacity-20" />
+                        <p>Chưa có từ vựng nào. Hãy tra cứu để bắt đầu!</p>
+                    </div>
+                )}
+            </div>
+            </section>
+
+            {/* Stories Section */}
+            <section>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <div className="flex items-center gap-2">
+                    <SparklesIcon className="w-5 h-5 text-purple-500" />
+                    <h2 className="font-semibold text-gray-700">Ôn tập qua truyện</h2>
+                </div>
+                
+                {/* Story Controls */}
+                <div className="flex flex-col gap-3">
+                     <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                         {SUGGESTED_THEMES.map(theme => (
+                             <button
+                                key={theme}
+                                onClick={() => setStoryTheme(theme)}
+                                className={`whitespace-nowrap px-3 py-1 rounded-full text-xs border transition-all ${
+                                    storyTheme === theme 
+                                    ? 'bg-purple-100 border-purple-300 text-purple-700' 
+                                    : 'bg-white border-gray-200 text-gray-600 hover:border-purple-200'
+                                }`}
+                             >
+                                 {theme}
+                             </button>
+                         ))}
+                     </div>
+                     
+                     <div className="flex items-stretch gap-2">
+                        <div className="flex bg-white rounded-lg border border-gray-200 p-1">
+                            <button
+                                onClick={() => setStoryType('story')}
+                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                                    storyType === 'story' ? 'bg-purple-100 text-purple-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'
+                                }`}
+                            >
+                                Truyện ngắn
+                            </button>
+                            <button
+                                onClick={() => setStoryType('dialogue')}
+                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                                    storyType === 'dialogue' ? 'bg-purple-100 text-purple-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'
+                                }`}
+                            >
+                                Hội thoại
+                            </button>
+                        </div>
+                        <input 
+                            type="text" 
+                            placeholder="Chủ đề tùy chọn..."
+                            className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-purple-400"
+                            value={storyTheme}
+                            onChange={(e) => setStoryTheme(e.target.value)}
+                        />
+                         <button
+                            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 shadow-sm whitespace-nowrap"
+                            onClick={() => handleGenerateStory(true)}
+                            disabled={isLoadingStory || history.length < 5}
+                        >
+                            {isLoadingStory ? "Đang viết..." : "Tạo truyện mới"}
+                        </button>
+                     </div>
+                </div>
+            </div>
+
+            <div className="space-y-8">
+                {stories.map((story) => (
+                <article key={story.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden group">
+                    <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-purple-100 p-2 rounded-lg">
+                            <BookOpenIcon className="w-5 h-5 text-purple-600" />
+                        </div>
+                        <div>
+                            <p className="font-semibold text-gray-800">{story.theme}</p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <span>{new Date(story.timestamp).toLocaleDateString('vi-VN')}</span>
+                                {story.generationTimeMs && (
+                                    <span className="flex items-center gap-0.5 bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-100">
+                                        ⚡ {(story.generationTimeMs / 1000).toFixed(1)}s
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {/* Voice Selector */}
+                        <div className="hidden sm:flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-gray-200">
+                            <select 
+                                value={selectedVoice}
+                                onChange={(e) => setSelectedVoice(e.target.value)}
+                                className="text-xs bg-transparent border-none focus:ring-0 text-gray-600 cursor-pointer outline-none w-24"
+                            >
+                                {VOICE_OPTIONS.map(v => (
+                                    <option key={v.id} value={v.id}>{v.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        
+                        {/* Audio Controls */}
+                         <button 
+                            onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
+                            className={`p-2.5 rounded-full transition-all flex items-center gap-2 ${
+                                activeAudioId === story.id 
+                                ? 'bg-purple-600 text-white shadow-md' 
+                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                            }`}
+                        >
+                            {activeAudioId === story.id && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
+                        </button>
+                        
+                        <button onClick={() => handleDeleteStory(story.id)} className="text-gray-400 hover:text-red-500 p-2">
+                             <TrashIcon className="w-5 h-5" />
+                        </button>
+                    </div>
+                    </div>
+                    
+                    <div className="p-6">
+                        {/* Interactive Story Content */}
+                        <div 
+                             className="prose prose-lg max-w-none mb-6 relative"
+                             onMouseUp={handleSelectionLookup}
+                             onTouchEnd={handleSelectionLookup}
+                        >
+                             <div className="text-gray-800 leading-relaxed font-serif text-lg tracking-wide whitespace-pre-line selection:bg-purple-200 selection:text-purple-900">
+                                 {/* We render raw text and highlight via dangerouslySetInnerHTML but with safe content */}
+                                 <InteractiveStoryText 
+                                    htmlContent={story.content} 
+                                    onWordClick={(word) => handleWordClick(word, story.content, null)}
+                                    highlightIndex={activeAudioId === story.id ? highlightedWordIndex : -1}
+                                 />
+                             </div>
+                             
+                             {/* Floating Lookup Button */}
+                             {selectionPopup && (
+                                 <div 
+                                     className="selection-popup fixed z-50 transform -translate-x-1/2 -translate-y-full mb-2"
+                                     style={{ left: selectionPopup.x, top: selectionPopup.y }}
+                                 >
+                                     <button
+                                         onClick={() => handleWordClick(selectionPopup.text, story.content, null)}
+                                         className="bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1 hover:bg-black transition-colors"
+                                     >
+                                         <BookOpenIcon className="w-3 h-3" />
+                                         Tra cứu
+                                     </button>
+                                     <div className="w-2 h-2 bg-gray-900 rotate-45 absolute left-1/2 -bottom-1 -translate-x-1/2"></div>
+                                 </div>
+                             )}
+                        </div>
+
+                        {/* Controls Bar */}
+                        <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 pt-4">
+                             <button 
+                                onClick={() => toggleVietnamese(story.id)}
+                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
+                                    showVietnamese[story.id] 
+                                    ? 'bg-blue-50 text-blue-700' 
+                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                }`}
+                             >
+                                 {showVietnamese[story.id] ? "Ẩn dịch nghĩa" : "Xem dịch nghĩa"}
+                             </button>
+
+                             <button 
+                                onClick={() => toggleGrammar(story.id)}
+                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-1 ${
+                                    showGrammar[story.id] 
+                                    ? 'bg-teal-50 text-teal-700' 
+                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                }`}
+                             >
+                                 <AcademicCapIcon className="w-4 h-4" />
+                                 {showGrammar[story.id] ? "Ẩn ngữ pháp" : "Phân tích ngữ pháp"}
+                             </button>
+                        </div>
+
+                        {/* Vietnamese Translation */}
+                        {showVietnamese[story.id] && (
+                            <div className="mt-4 p-4 bg-blue-50 rounded-xl text-gray-700 text-base leading-relaxed border border-blue-100 animate-fade-in">
+                                <h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Bản dịch tiếng Việt</h4>
+                                {story.vietnameseContent}
+                            </div>
+                        )}
+                        
+                        {/* Grammar Analysis */}
+                        {showGrammar[story.id] && (
+                            <div className="mt-4 p-5 bg-teal-50 rounded-xl border border-teal-100 animate-fade-in">
+                                <h4 className="text-sm font-bold text-teal-800 uppercase mb-3 flex items-center gap-2">
+                                    <SparklesIcon className="w-4 h-4" />
+                                    Góc Ngữ Pháp
+                                </h4>
+                                {story.grammarPoints && story.grammarPoints.length > 0 ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {story.grammarPoints.map((point, idx) => (
+                                            <div key={idx} className="bg-white p-3 rounded-lg shadow-sm border border-teal-100/50">
+                                                <p className="font-bold text-teal-700 text-sm mb-1">{point.structure}</p>
+                                                <p className="text-gray-600 text-xs mb-2">{point.explanation}</p>
+                                                <div className="bg-gray-50 p-2 rounded text-xs text-gray-500 italic border-l-2 border-teal-300">
+                                                    "{point.exampleInStory}"
+                                                </div>
+                                                <p className="mt-2 text-[10px] text-teal-600 font-medium">💡 Mẹo: {point.memoryTip}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500 italic">Dữ liệu ngữ pháp chưa có cho câu chuyện này.</p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </article>
+                ))}
+            </div>
+            </section>
+        </>
+        )}
+
       </main>
 
+      {/* Word Definition Modal */}
       {selectedWord && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pointer-events-none p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-xl border border-gray-100 p-6 pointer-events-auto mb-4 sm:mb-0 animate-fade-in">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                  {selectedWord.word}
-                  <span className="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-mono">{selectedWord.phonetic}</span>
-                </h3>
-                <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide mt-1">{selectedWord.type}</p>
-              </div>
-              <button onClick={() => setSelectedWord(null)} className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded-full transition-colors"><XMarkIcon className="w-5 h-5" /></button>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedWord(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
+            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-4 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white capitalize">{selectedWord.word}</h3>
+              <button onClick={() => setSelectedWord(null)} className="text-white/80 hover:text-white">
+                <XMarkIcon className="w-6 h-6" />
+              </button>
             </div>
-            <div className="space-y-3">
-              <p className="text-gray-700 text-base">{selectedWord.meaning}</p>
-              {selectedWord.example && <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm text-gray-600 italic">"{selectedWord.example}"</div>}
+            
+            <div className="p-6">
+               {isLookingUp && selectedWord.meaning === 'Đang tra cứu...' ? (
+                   <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
+                       <p>Đang tra cứu thông minh...</p>
+                   </div>
+               ) : (
+                   <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                            <span className="font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded text-sm border border-gray-200">/{selectedWord.phonetic}/</span>
+                            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded uppercase tracking-wide border border-indigo-100">{selectedWord.type}</span>
+                        </div>
+                        
+                        <div>
+                            <p className="text-gray-400 text-xs font-bold uppercase mb-1">Định nghĩa</p>
+                            <p className="text-gray-800 font-medium text-lg leading-snug">{selectedWord.meaning}</p>
+                        </div>
+
+                        {selectedWord.example && (
+                            <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
+                                <p className="text-amber-600 text-xs font-bold uppercase mb-1">Ví dụ / Ghi chú</p>
+                                <p className="text-gray-700 italic text-sm">"{selectedWord.example}"</p>
+                            </div>
+                        )}
+                        
+                        <div className="pt-4 border-t border-gray-100 flex justify-end">
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAudioToggle('lookup', selectedWord.word);
+                                }}
+                                className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-full transition-colors"
+                            >
+                                <SpeakerWaveIcon className="w-4 h-4" />
+                                Nghe phát âm
+                            </button>
+                        </div>
+                   </div>
+               )}
             </div>
           </div>
         </div>
@@ -1232,5 +1219,74 @@ const App: React.FC = () => {
     </div>
   );
 };
+
+// Helper component for interactive text highlighting
+const InteractiveStoryText: React.FC<{ 
+    htmlContent: string; 
+    onWordClick: (word: string) => void;
+    highlightIndex: number;
+}> = React.memo(({ htmlContent, onWordClick, highlightIndex }) => {
+    // 1. Parse HTML to keep structure but make words interactive
+    // 2. We split by spaces but preserve tags like <b>
+    
+    // A simplified parser that wraps text nodes in spans
+    const createMarkup = () => {
+        // Remove existing b tags for processing, or keep them? 
+        // Better strategy: Split by spaces, render words. If word was inside <b>, keep bold style.
+        // This is complex for React. Let's do a simpler approach:
+        // Use a temp div to parse HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlContent;
+        
+        let wordCounter = 0;
+
+        const processNode = (node: Node): React.ReactNode => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent || "";
+                // Split by spaces but keep delimiters
+                const parts = text.split(/(\s+)/);
+                
+                return parts.map((part, i) => {
+                    if (part.trim().length === 0) return part; // Return spaces as is
+                    
+                    const currentIndex = wordCounter++;
+                    const isHighlighted = currentIndex === highlightIndex;
+                    
+                    return (
+                        <span 
+                            key={i}
+                            className={`cursor-pointer transition-colors duration-200 rounded px-0.5 mx-[-2px] 
+                                ${isHighlighted ? 'bg-yellow-300 text-yellow-900 shadow-sm scale-105 inline-block' : 'hover:bg-purple-100 hover:text-purple-700'}
+                            `}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onWordClick(part.replace(/[.,!?;:()"]/g, ""));
+                            }}
+                        >
+                            {part}
+                        </span>
+                    );
+                });
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const element = node as HTMLElement;
+                const tagName = element.tagName.toLowerCase();
+                const children = Array.from(element.childNodes).map((child, i) => <React.Fragment key={i}>{processNode(child)}</React.Fragment>);
+                
+                if (tagName === 'b' || tagName === 'strong') {
+                    return <strong className="font-bold text-indigo-700 bg-indigo-50/50 rounded px-1 box-decoration-clone">{children}</strong>;
+                }
+                if (tagName === 'br') return <br />;
+                if (tagName === 'p') return <p className="mb-4">{children}</p>;
+                
+                return <span>{children}</span>;
+            }
+            return null;
+        };
+
+        return Array.from(tempDiv.childNodes).map((node, i) => <React.Fragment key={i}>{processNode(node)}</React.Fragment>);
+    };
+
+    return <>{createMarkup()}</>;
+});
 
 export default App;
