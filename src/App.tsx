@@ -78,6 +78,10 @@ const App: React.FC = () => {
   const [storyTheme, setStoryTheme] = useState('');
   const [storyType, setStoryType] = useState<'story' | 'dialogue'>('story');
   
+  // Session Timer State
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [onlineSeconds, setOnlineSeconds] = useState(0);
+  
   // Suggestion State
   const [suggestions, setSuggestions] = useState<WordSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -179,6 +183,24 @@ const App: React.FC = () => {
     });
     return groupList;
   }, [stories]);
+
+  // Session Timer Effect
+  useEffect(() => {
+    const timer = setInterval(() => {
+        setCurrentTime(new Date());
+        setOnlineSeconds(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDuration = (totalSeconds: number) => {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    return `${minutes}m ${seconds}s`;
+  };
 
   useEffect(() => {
     const savedHistory = localStorage.getItem(STORAGE_KEY_HISTORY);
@@ -725,11 +747,30 @@ const App: React.FC = () => {
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookOpenIcon className="w-7 h-7 text-blue-600" />
-            <h1 className="text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 truncate">VocaStory AI</h1>
+            <div>
+                 <h1 className="text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 truncate">VocaStory AI</h1>
+                 {/* Session Timeline for Mobile (Simplified) */}
+                 <p className="text-[10px] text-gray-400 md:hidden flex items-center gap-1">
+                    <ClockIcon className="w-3 h-3" /> {formatDuration(onlineSeconds)}
+                 </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs md:text-sm text-gray-500 bg-gray-50 px-2 py-1 rounded-full border border-gray-200">
-            <ClockIcon className="w-4 h-4" />
-            <span>{Math.round(progressPercent)}% năng lượng</span>
+          
+          <div className="flex items-center gap-4">
+              {/* Session Timeline for PC */}
+              <div className="hidden md:flex flex-col items-end text-xs text-gray-500 border-r border-gray-100 pr-4 mr-2">
+                  <span className="font-medium text-gray-700">
+                      {currentTime.toLocaleTimeString('vi-VN')}
+                  </span>
+                  <span className="flex items-center gap-1">
+                      Online: {formatDuration(onlineSeconds)}
+                  </span>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs md:text-sm text-gray-500 bg-gray-50 px-2 py-1 rounded-full border border-gray-200">
+                <ClockIcon className="w-4 h-4" />
+                <span>{Math.round(progressPercent)}% năng lượng</span>
+              </div>
           </div>
         </div>
       </header>
@@ -1228,22 +1269,38 @@ const App: React.FC = () => {
                                             </div>
                                             
                                             {/* Audio Controls */}
-                                            <button 
-                                                onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
-                                                className={`p-2 rounded-full transition-all flex items-center justify-center gap-2 ${
-                                                    activeAudioId === story.id 
-                                                    ? 'bg-purple-600 text-white shadow-md ring-2 ring-purple-200' 
-                                                    : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50 hover:text-purple-600'
-                                                }`}
-                                            >
-                                                {activeAudioId === story.id && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
-                                            </button>
+                                            <div className="relative">
+                                                <button 
+                                                    onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
+                                                    className={`p-2 rounded-full transition-all flex items-center justify-center gap-2 relative overflow-hidden ${
+                                                        activeAudioId === story.id 
+                                                        ? 'bg-purple-600 text-white shadow-md ring-2 ring-purple-200' 
+                                                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50 hover:text-purple-600'
+                                                    }`}
+                                                >
+                                                    {isLoadingAudio && activeAudioId === story.id ? (
+                                                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                    ) : (
+                                                        activeAudioId === story.id && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />
+                                                    )}
+                                                </button>
+                                            </div>
                                             
                                             <button onClick={() => handleDeleteStory(story.id)} className="text-gray-400 hover:text-red-500 p-2 hover:bg-red-50 rounded-full transition-colors">
                                                 <TrashIcon className="w-5 h-5" />
                                             </button>
                                         </div>
                                     </div>
+
+                                    {/* Audio Progress Bar */}
+                                    {activeAudioId === story.id && (
+                                        <div className="h-1 w-full bg-gray-100">
+                                            <div 
+                                                className="h-full bg-purple-500 transition-all duration-300 ease-linear"
+                                                style={{ width: `${audioProgress * 100}%` }}
+                                            ></div>
+                                        </div>
+                                    )}
                                     
                                     <div className="p-5 md:p-8">
                                         {/* Cloze Test Controls (Visible only when active) */}
