@@ -17,7 +17,8 @@ import {
   ClipboardDocumentCheckIcon,
   CheckCircleIcon,
   XCircleIcon,
-  ChevronDownIcon
+  ChevronDownIcon,
+  PencilSquareIcon
 } from './components/Icons';
 
 // Constants
@@ -100,6 +101,12 @@ const App: React.FC = () => {
   const [audioProgress, setAudioProgress] = useState<number>(0);
   const [highlightedWordIndex, setHighlightedWordIndex] = useState<number>(-1);
   
+  // Cloze Test State (Fill in the blank)
+  const [clozeStoryId, setClozeStoryId] = useState<string | null>(null);
+  const [clozeHiddenIndices, setClozeHiddenIndices] = useState<number[]>([]);
+  const [userClozeInputs, setUserClozeInputs] = useState<Record<number, string>>({});
+  const [clozeSubmitted, setClozeSubmitted] = useState<boolean>(false);
+
   // Audio Context Refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -380,6 +387,7 @@ const App: React.FC = () => {
   const handleDeleteStory = (id: string) => {
     setStories(prev => prev.filter(story => story.id !== id));
     if (activeAudioId === id) stopAllAudio();
+    if (clozeStoryId === id) handleExitClozeTest();
   };
 
   const handleWordClick = async (word: string, context: string, event: React.MouseEvent | null) => {
@@ -431,6 +439,51 @@ const App: React.FC = () => {
 
   const toggleVietnamese = (storyId: string) => setShowVietnamese(prev => ({ ...prev, [storyId]: !prev[storyId] }));
   const toggleGrammar = (storyId: string) => setShowGrammar(prev => ({ ...prev, [storyId]: !prev[storyId] }));
+
+  // --- CLOZE TEST FUNCTIONS ---
+  const handleStartClozeTest = (storyId: string, content: string) => {
+      // Basic text parsing to find words
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      const plainText = tempDiv.textContent || "";
+      const words = plainText.split(/(\s+)/);
+      
+      const wordIndices: number[] = [];
+      words.forEach((w, i) => {
+          // Filter only actual words (longer than 2 chars, not just punctuation)
+          if (w.trim().length > 2 && /^[a-zA-Z]+$/.test(w.replace(/[.,!?;:]/g, ''))) {
+              wordIndices.push(i);
+          }
+      });
+
+      // Randomly select 20% of words to hide
+      const numToHide = Math.max(1, Math.floor(wordIndices.length * 0.2));
+      const shuffled = wordIndices.sort(() => 0.5 - Math.random());
+      const selectedIndices = shuffled.slice(0, numToHide);
+
+      setClozeHiddenIndices(selectedIndices);
+      setClozeStoryId(storyId);
+      setUserClozeInputs({});
+      setClozeSubmitted(false);
+      
+      // Stop audio if playing
+      stopAllAudio();
+  };
+
+  const handleClozeInputChange = (index: number, value: string) => {
+      setUserClozeInputs(prev => ({ ...prev, [index]: value }));
+  };
+
+  const handleSubmitCloze = () => {
+      setClozeSubmitted(true);
+  };
+
+  const handleExitClozeTest = () => {
+      setClozeStoryId(null);
+      setClozeHiddenIndices([]);
+      setUserClozeInputs({});
+      setClozeSubmitted(false);
+  };
 
   const base64ToBytes = (base64: string) => {
     const binaryString = window.atob(base64);
@@ -523,10 +576,20 @@ const App: React.FC = () => {
             if (preferredVoice) utterance.voice = preferredVoice;
 
             // Simple visual feedback for Native TTS
+            utterance.onboundary = (event) => {
+                if (event.name === 'word') {
+                     // Estimate word index based on char index - rough approximation for Native TTS
+                     const charIndex = event.charIndex;
+                     const textBefore = cleanText.substring(0, charIndex);
+                     const wordIdx = textBefore.trim().split(/\s+/).length;
+                     setHighlightedWordIndex(wordIdx);
+                }
+            };
             utterance.onstart = () => setIsPaused(false);
             utterance.onend = () => {
                 setIsPaused(false);
                 setActiveAudioId(null);
+                setHighlightedWordIndex(-1);
             };
             
             window.speechSynthesis.speak(utterance);
@@ -1139,6 +1202,18 @@ const App: React.FC = () => {
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                                            {/* Cloze Test Button */}
+                                            {clozeStoryId !== story.id && (
+                                                <button
+                                                    onClick={() => handleStartClozeTest(story.id, story.content)}
+                                                    className="p-2 bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all shadow-sm"
+                                                    title="Luyện nghe điền từ"
+                                                >
+                                                    <PencilSquareIcon className="w-4 h-4" />
+                                                    <span className="hidden sm:inline">Kiểm tra</span>
+                                                </button>
+                                            )}
+
                                             {/* Voice Selector */}
                                             <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm">
                                                 <select 
@@ -1171,6 +1246,39 @@ const App: React.FC = () => {
                                     </div>
                                     
                                     <div className="p-5 md:p-8">
+                                        {/* Cloze Test Controls (Visible only when active) */}
+                                        {clozeStoryId === story.id && (
+                                            <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-wrap items-center justify-between gap-4 animate-fade-in">
+                                                <div className="text-sm text-indigo-800 font-medium flex items-center gap-2">
+                                                    <PencilSquareIcon className="w-5 h-5" />
+                                                    Chế độ luyện nghe điền từ
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    {!clozeSubmitted ? (
+                                                        <button 
+                                                            onClick={handleSubmitCloze}
+                                                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-sm"
+                                                        >
+                                                            Nộp bài
+                                                        </button>
+                                                    ) : (
+                                                        <button 
+                                                            onClick={() => handleStartClozeTest(story.id, story.content)}
+                                                            className="px-4 py-2 bg-white text-indigo-600 border border-indigo-200 text-sm font-bold rounded-lg hover:bg-indigo-50"
+                                                        >
+                                                            Làm lại
+                                                        </button>
+                                                    )}
+                                                    <button 
+                                                        onClick={handleExitClozeTest}
+                                                        className="px-4 py-2 bg-white text-gray-600 border border-gray-200 text-sm font-bold rounded-lg hover:bg-gray-50"
+                                                    >
+                                                        Thoát
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Interactive Story Content */}
                                         <div 
                                             className="prose prose-lg max-w-none mb-8 relative"
@@ -1182,6 +1290,11 @@ const App: React.FC = () => {
                                                     htmlContent={story.content} 
                                                     onWordClick={(word) => handleWordClick(word, story.content, null)}
                                                     highlightIndex={activeAudioId === story.id ? highlightedWordIndex : -1}
+                                                    isClozeMode={clozeStoryId === story.id}
+                                                    hiddenIndices={clozeHiddenIndices}
+                                                    userInputs={userClozeInputs}
+                                                    onInputChange={handleClozeInputChange}
+                                                    isSubmitted={clozeSubmitted}
                                                 />
                                             </div>
                                             
@@ -1379,16 +1492,22 @@ const InteractiveStoryText: React.FC<{
     htmlContent: string; 
     onWordClick: (word: string) => void;
     highlightIndex: number;
-}> = React.memo(({ htmlContent, onWordClick, highlightIndex }) => {
-    // 1. Parse HTML to keep structure but make words interactive
-    // 2. We split by spaces but preserve tags like <b>
-    
-    // A simplified parser that wraps text nodes in spans
+    isClozeMode?: boolean;
+    hiddenIndices?: number[];
+    userInputs?: Record<number, string>;
+    onInputChange?: (index: number, value: string) => void;
+    isSubmitted?: boolean;
+}> = React.memo(({ 
+    htmlContent, 
+    onWordClick, 
+    highlightIndex, 
+    isClozeMode = false, 
+    hiddenIndices = [], 
+    userInputs = {}, 
+    onInputChange, 
+    isSubmitted = false 
+}) => {
     const createMarkup = () => {
-        // Remove existing b tags for processing, or keep them? 
-        // Better strategy: Split by spaces, render words. If word was inside <b>, keep bold style.
-        // This is complex for React. Let's do a simpler approach:
-        // Use a temp div to parse HTML
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = htmlContent;
         
@@ -1397,15 +1516,45 @@ const InteractiveStoryText: React.FC<{
         const processNode = (node: Node): React.ReactNode => {
             if (node.nodeType === Node.TEXT_NODE) {
                 const text = node.textContent || "";
-                // Split by spaces but keep delimiters
                 const parts = text.split(/(\s+)/);
                 
                 return parts.map((part, i) => {
-                    if (part.trim().length === 0) return part; // Return spaces as is
+                    if (part.trim().length === 0) return part; // Return spaces
                     
                     const currentIndex = wordCounter++;
                     const isHighlighted = currentIndex === highlightIndex;
                     
+                    // Cloze Test Logic
+                    if (isClozeMode && hiddenIndices.includes(currentIndex)) {
+                        const cleanWord = part.replace(/[.,!?;:()"]/g, "");
+                        const userInput = userInputs[currentIndex] || "";
+                        const isCorrect = userInput.toLowerCase().trim() === cleanWord.toLowerCase().trim();
+
+                        return (
+                            <span key={`cloze-${i}`} className="inline-flex flex-col align-middle mx-1">
+                                <input 
+                                    type="text" 
+                                    className={`w-20 sm:w-24 px-1 py-0.5 text-sm md:text-base border-b-2 bg-gray-50 focus:outline-none transition-colors text-center font-semibold rounded-t-sm ${
+                                        isSubmitted 
+                                            ? (isCorrect 
+                                                ? "border-green-500 bg-green-50 text-green-700" 
+                                                : "border-red-500 bg-red-50 text-red-700")
+                                            : "border-indigo-300 focus:border-indigo-600 text-indigo-900"
+                                    }`}
+                                    value={userInput}
+                                    onChange={(e) => onInputChange && onInputChange(currentIndex, e.target.value)}
+                                    disabled={isSubmitted}
+                                    autoComplete="off"
+                                />
+                                {isSubmitted && !isCorrect && (
+                                    <span className="text-[10px] text-green-600 font-bold text-center animate-fade-in block mt-0.5">
+                                        {cleanWord}
+                                    </span>
+                                )}
+                            </span>
+                        );
+                    }
+
                     return (
                         <span 
                             key={i}
