@@ -17,7 +17,17 @@ import {
   ClipboardDocumentCheckIcon,
   CheckCircleIcon,
   XCircleIcon,
-  ChevronDownIcon
+  ChevronDownIcon,
+  PencilSquareIcon,
+  TrophyIcon,
+  BoltIcon,
+  MicrophoneIcon,
+  Cog6ToothIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  LockClosedIcon
 } from './components/Icons';
 
 // Constants
@@ -25,6 +35,7 @@ const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 const STORAGE_KEY_HISTORY = 'vocastory_history';
 const STORAGE_KEY_STORY = 'vocastory_stories';
 const STORAGE_KEY_LAST_GEN = 'vocastory_last_gen_time';
+const STORAGE_KEY_API = 'VOCA_CUSTOM_API_KEY';
 
 const SUGGESTED_THEMES = [
   "Cuộc sống hàng ngày",
@@ -33,7 +44,11 @@ const SUGGESTED_THEMES = [
   "Tình bạn & Gia đình",
   "Khoa học & Công nghệ",
   "Phiêu lưu giả tưởng",
-  "Đồ ăn & Ẩm thực"
+  "Đồ ăn & Ẩm thực",
+  "Thể thao & Sức khỏe",
+  "Nghệ thuật & Giải trí",
+  "Thiên nhiên & Môi trường",
+  "Lịch sử & Văn hóa"
 ];
 
 const QUICK_SUGGESTIONS = {
@@ -44,7 +59,9 @@ const QUICK_SUGGESTIONS = {
     "Tôi đang học tiếng Anh",
     "Món ăn này rất ngon",
     "Cho tôi một ly cà phê",
-    "Rất vui được gặp bạn"
+    "Rất vui được gặp bạn",
+    "Bạn có thể giúp tôi không?",
+    "Hẹn gặp lại sau"
   ],
   en_vi: [
     "Hello, how are you?",
@@ -53,7 +70,9 @@ const QUICK_SUGGESTIONS = {
     "I am learning Vietnamese",
     "This food is delicious",
     "Can I have a coffee?",
-    "Nice to meet you"
+    "Nice to meet you",
+    "Can you help me?",
+    "See you later"
   ]
 };
 
@@ -77,6 +96,20 @@ const App: React.FC = () => {
   const [storyTheme, setStoryTheme] = useState('');
   const [storyType, setStoryType] = useState<'story' | 'dialogue'>('story');
   
+  // Settings State
+  const [showSettings, setShowSettings] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [tempApiKey, setTempApiKey] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // Session Timer State
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [onlineSeconds, setOnlineSeconds] = useState(0);
+  const [showCongratulation, setShowCongratulation] = useState(false);
+  
+  // Energy System State
+  const [energy, setEnergy] = useState(100);
+
   // Suggestion State
   const [suggestions, setSuggestions] = useState<WordSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -99,7 +132,17 @@ const App: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
   const [audioProgress, setAudioProgress] = useState<number>(0);
   const [highlightedWordIndex, setHighlightedWordIndex] = useState<number>(-1);
+  const [isListening, setIsListening] = useState(false);
   
+  // Audio Cache
+  const audioCacheRef = useRef<Record<string, string>>({}); // Key: id-voiceId, Value: base64 string
+
+  // Cloze Test State (Fill in the blank)
+  const [clozeStoryId, setClozeStoryId] = useState<string | null>(null);
+  const [clozeHiddenIndices, setClozeHiddenIndices] = useState<number[]>([]);
+  const [userClozeInputs, setUserClozeInputs] = useState<Record<number, string>>({});
+  const [clozeSubmitted, setClozeSubmitted] = useState<boolean>(false);
+
   // Audio Context Refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -173,14 +216,43 @@ const App: React.FC = () => {
     return groupList;
   }, [stories]);
 
+  // Session Timer Effect
+  useEffect(() => {
+    const timer = setInterval(() => {
+        setCurrentTime(new Date());
+        setOnlineSeconds(prev => {
+            const newValue = prev + 1;
+            if (newValue === 600) { // 10 minutes
+                setShowCongratulation(true);
+            }
+            return newValue;
+        });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDuration = (totalSeconds: number) => {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    return `${minutes}m ${seconds}s`;
+  };
+
   useEffect(() => {
     const savedHistory = localStorage.getItem(STORAGE_KEY_HISTORY);
     const savedStories = localStorage.getItem(STORAGE_KEY_STORY);
     const savedTime = localStorage.getItem(STORAGE_KEY_LAST_GEN);
+    const savedKey = localStorage.getItem(STORAGE_KEY_API);
 
     if (savedHistory) setHistory(JSON.parse(savedHistory));
     if (savedStories) setStories(JSON.parse(savedStories));
     if (savedTime) setLastGenTime(parseInt(savedTime, 10));
+    if (savedKey) {
+        setCustomApiKey(savedKey);
+        setTempApiKey(savedKey);
+    }
 
     return () => {
       stopAllAudio();
@@ -272,6 +344,50 @@ const App: React.FC = () => {
       setShowSuggestions(false);
       triggerTranslate(suggestion.word);
   };
+  
+  const handleVoiceInput = () => {
+    if (!('webkitSpeechRecognition' in window)) {
+        alert("Trình duyệt của bạn không hỗ trợ nhận diện giọng nói.");
+        return;
+    }
+
+    const recognition = new (window as any).webkitSpeechRecognition();
+    recognition.lang = direction === 'vi_en' ? 'vi-VN' : 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+        setIsListening(true);
+    };
+
+    recognition.onend = () => {
+        setIsListening(false);
+    };
+
+    recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setInputText(transcript);
+        ignoreFetchRef.current = true; // avoid autocomplete trigger immediately
+        setTimeout(() => triggerTranslate(transcript), 500);
+    };
+
+    recognition.onerror = (event: any) => {
+        console.error("Voice input error", event.error);
+        setIsListening(false);
+        if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+             alert("Vui lòng cấp quyền Microphone cho trang web để sử dụng tính năng này.");
+        }
+    };
+
+    recognition.start();
+  };
+
+  const handleSaveApiKey = () => {
+      localStorage.setItem(STORAGE_KEY_API, tempApiKey);
+      setCustomApiKey(tempApiKey);
+      setShowSettings(false);
+      alert("Đã lưu API Key thành công! Ứng dụng sẽ ưu tiên sử dụng Key của bạn.");
+  };
 
   const performTranslation = async (text: string) => {
     if (!text.trim()) return;
@@ -281,6 +397,7 @@ const App: React.FC = () => {
     
     try {
       const result = await translateText(text, direction);
+      setEnergy(prev => Math.max(0, prev - 2)); // Consume energy
       
       let englishText = "";
       let vietnameseText = "";
@@ -308,7 +425,7 @@ const App: React.FC = () => {
           setHistory(prev => [newItem, ...prev]);
       }
     } catch (error) {
-      alert("Lỗi dịch thuật. Vui lòng kiểm tra mạng.");
+      alert("Lỗi dịch thuật. Vui lòng kiểm tra mạng hoặc API Key.");
     } finally {
       setIsLoadingTranslate(false);
     }
@@ -318,6 +435,13 @@ const App: React.FC = () => {
   const handleTranslate = useCallback(() => performTranslation(inputText), [inputText, direction]);
 
   const handleGenerateStory = useCallback(async (force: boolean = false) => {
+    // API KEY CHECK
+    if (!customApiKey) {
+        alert("Để sử dụng tính năng Tạo Truyện, vui lòng nhập API Key của riêng bạn trong phần Cài đặt.");
+        setShowSettings(true);
+        return;
+    }
+
     const recentWords = history.filter(item => item.timestamp > lastGenTime);
     let targetWords = recentWords;
     if (targetWords.length < 5) targetWords = history.slice(0, 15);
@@ -332,12 +456,19 @@ const App: React.FC = () => {
       return;
     }
 
+    if (energy < 15) {
+        alert("Bạn không đủ năng lượng để tạo truyện mới. Hãy nghỉ ngơi một chút!");
+        return;
+    }
+
     setIsLoadingStory(true);
     const startTime = Date.now();
     try {
       const wordList = targetWords.map(w => w.english);
       const result = await generateStoryFromWords(wordList, storyTheme, storyType);
       
+      setEnergy(prev => Math.max(0, prev - 15)); // Consume energy
+
       const endTime = Date.now();
       const duration = endTime - startTime;
 
@@ -360,7 +491,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoadingStory(false);
     }
-  }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen, storyType]);
+  }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen, storyType, energy, customApiKey]);
 
   const handleClearHistory = () => {
     if (window.confirm("Xóa toàn bộ lịch sử?")) {
@@ -380,6 +511,7 @@ const App: React.FC = () => {
   const handleDeleteStory = (id: string) => {
     setStories(prev => prev.filter(story => story.id !== id));
     if (activeAudioId === id) stopAllAudio();
+    if (clozeStoryId === id) handleExitClozeTest();
   };
 
   const handleWordClick = async (word: string, context: string, event: React.MouseEvent | null) => {
@@ -431,6 +563,51 @@ const App: React.FC = () => {
 
   const toggleVietnamese = (storyId: string) => setShowVietnamese(prev => ({ ...prev, [storyId]: !prev[storyId] }));
   const toggleGrammar = (storyId: string) => setShowGrammar(prev => ({ ...prev, [storyId]: !prev[storyId] }));
+
+  // --- CLOZE TEST FUNCTIONS ---
+  const handleStartClozeTest = (storyId: string, content: string) => {
+      // Basic text parsing to find words
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      const plainText = tempDiv.textContent || "";
+      const words = plainText.split(/(\s+)/);
+      
+      const wordIndices: number[] = [];
+      words.forEach((w, i) => {
+          // Filter only actual words (longer than 2 chars, not just punctuation)
+          if (w.trim().length > 2 && /^[a-zA-Z]+$/.test(w.replace(/[.,!?;:]/g, ''))) {
+              wordIndices.push(i);
+          }
+      });
+
+      // Randomly select 20% of words to hide
+      const numToHide = Math.max(1, Math.floor(wordIndices.length * 0.2));
+      const shuffled = wordIndices.sort(() => 0.5 - Math.random());
+      const selectedIndices = shuffled.slice(0, numToHide);
+
+      setClozeHiddenIndices(selectedIndices);
+      setClozeStoryId(storyId);
+      setUserClozeInputs({});
+      setClozeSubmitted(false);
+      
+      // Stop audio if playing
+      stopAllAudio();
+  };
+
+  const handleClozeInputChange = (index: number, value: string) => {
+      setUserClozeInputs(prev => ({ ...prev, [index]: value }));
+  };
+
+  const handleSubmitCloze = () => {
+      setClozeSubmitted(true);
+  };
+
+  const handleExitClozeTest = () => {
+      setClozeStoryId(null);
+      setClozeHiddenIndices([]);
+      setUserClozeInputs({});
+      setClozeSubmitted(false);
+  };
 
   const base64ToBytes = (base64: string) => {
     const binaryString = window.atob(base64);
@@ -523,15 +700,21 @@ const App: React.FC = () => {
             if (preferredVoice) utterance.voice = preferredVoice;
 
             // Simple visual feedback for Native TTS
+            utterance.onboundary = (event) => {
+                if (event.name === 'word') {
+                     // Estimate word index based on char index - rough approximation for Native TTS
+                     const charIndex = event.charIndex;
+                     const textBefore = cleanText.substring(0, charIndex);
+                     const wordIdx = textBefore.trim().split(/\s+/).length;
+                     setHighlightedWordIndex(wordIdx);
+                }
+            };
             utterance.onstart = () => setIsPaused(false);
             utterance.onend = () => {
                 setIsPaused(false);
                 setActiveAudioId(null);
+                setHighlightedWordIndex(-1);
             };
-            
-            // Basic word estimation for native TTS based on time
-            // Note: 'onboundary' is the proper way but requires exact text matching which is complex with cleaned text
-            // We'll stick to simple playback status for now
             
             window.speechSynthesis.speak(utterance);
         } catch (e) {
@@ -555,7 +738,24 @@ const App: React.FC = () => {
              await audioContextRef.current.resume();
         }
 
-        const audioData = await generateSpeech(text, selectedVoice, isDialogue);
+        // Check Cache first
+        const cacheKey = `${id}-${selectedVoice}`;
+        let audioData = audioCacheRef.current[cacheKey];
+
+        if (!audioData) {
+             if (energy < 10) {
+                 alert("Không đủ năng lượng để tạo giọng đọc AI mới. Chuyển sang giọng máy.");
+                 playNativeTTS(text);
+                 return;
+             }
+             // Fetch from API
+             const fetchedData = await generateSpeech(text, selectedVoice, isDialogue);
+             if (fetchedData) {
+                 audioData = fetchedData;
+                 audioCacheRef.current[cacheKey] = audioData; // Store in cache
+                 setEnergy(prev => Math.max(0, prev - 10)); // Deduct energy only for new generation
+             }
+        }
         
         if (!audioData) {
             console.warn("Gemini Audio failed, falling back to Native TTS");
@@ -612,6 +812,13 @@ const App: React.FC = () => {
 
   // --- Quiz Logic ---
   const handleStartQuiz = async () => {
+    // API KEY CHECK
+    if (!customApiKey) {
+        alert("Để sử dụng tính năng Kiểm Tra, vui lòng nhập API Key của riêng bạn trong phần Cài đặt.");
+        setShowSettings(true);
+        return;
+    }
+
     if (history.length < 5) {
         alert("Bạn cần ít nhất 5 từ vựng trong lịch sử để tạo bài kiểm tra!");
         return;
@@ -629,6 +836,7 @@ const App: React.FC = () => {
     try {
         const questions = await generateQuizFromWords(selectedWords);
         setQuizQuestions(questions);
+        setEnergy(prev => Math.max(0, prev - 5)); // Deduct energy
     } catch (error) {
         alert("Không thể tạo bài kiểm tra. Vui lòng thử lại.");
         setIsQuizMode(false);
@@ -660,32 +868,70 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 pb-20">
+    <div className="min-h-screen bg-gray-50 text-gray-800 pb-20 font-sans">
       {/* Header */}
-      <header className="bg-white shadow-sm sticky top-0 z-40">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
+      <header className="bg-white shadow-sm sticky top-0 z-40 border-b border-gray-100">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BookOpenIcon className="w-8 h-8 text-blue-600" />
-            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600">Learning English By TNP</h1>
+            <BookOpenIcon className="w-7 h-7 text-blue-600" />
+            <div>
+                 <h1 className="text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 truncate">VocaStory AI</h1>
+                 {/* Session Timeline for Mobile (Simplified) */}
+                 <p className="text-[10px] text-gray-400 md:hidden flex items-center gap-1">
+                    <ClockIcon className="w-3 h-3" /> {formatDuration(onlineSeconds)}
+                 </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <ClockIcon className="w-4 h-4" />
-            <span>{Math.round(progressPercent)}% hồi phục</span>
+          
+          <div className="flex items-center gap-3">
+              {/* Energy Bar */}
+              <div className="flex items-center gap-2">
+                  <BoltIcon className={`w-5 h-5 ${energy < 20 ? 'text-red-500 animate-pulse' : 'text-yellow-500'}`} />
+                  <div className="w-16 md:w-32 h-2.5 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
+                      <div 
+                        className={`h-full transition-all duration-500 ${energy < 20 ? 'bg-red-500' : 'bg-gradient-to-r from-yellow-400 to-orange-500'}`}
+                        style={{ width: `${energy}%` }}
+                      ></div>
+                  </div>
+                  <span className="text-xs font-bold text-gray-600 hidden md:inline">{Math.round(energy)}%</span>
+              </div>
+
+              {/* Settings Button */}
+              <button 
+                onClick={() => setShowSettings(true)}
+                className={`p-2 rounded-full transition-colors relative ${customApiKey ? 'text-green-600 bg-green-50' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                title="Cài đặt API"
+              >
+                  <Cog6ToothIcon className="w-6 h-6" />
+                  {!customApiKey && (
+                      <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                  )}
+              </button>
+
+              {/* Session Timeline for PC */}
+              <div className="hidden md:flex flex-col items-end text-xs text-gray-500 border-l border-gray-100 pl-4 ml-1">
+                  <span className="font-medium text-gray-700">
+                      {currentTime.toLocaleTimeString('vi-VN')}
+                  </span>
+                  <span className="flex items-center gap-1">
+                      Online: {formatDuration(onlineSeconds)}
+                  </span>
+              </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-6 space-y-8">
+      <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
         
         {/* Quiz Mode View */}
         {isQuizMode ? (
-            <div className="bg-white rounded-2xl shadow-lg p-6 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-lg p-6 animate-fade-in border border-gray-100">
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
-                    <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-2">
                         <ClipboardDocumentCheckIcon className="w-6 h-6 text-blue-500" />
                         Kiểm Tra Từ Vựng
                     </h2>
-                    <button onClick={handleExitQuiz} className="text-gray-500 hover:text-gray-700">
+                    <button onClick={handleExitQuiz} className="text-gray-500 hover:text-gray-700 p-2 hover:bg-gray-100 rounded-full">
                         <XMarkIcon className="w-6 h-6" />
                     </button>
                 </div>
@@ -693,29 +939,32 @@ const App: React.FC = () => {
                 {isLoadingQuiz ? (
                     <div className="py-20 text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                        <p className="text-gray-600">AI đang soạn đề thi cho bạn...</p>
+                        <p className="text-gray-600">AI đang soạn đề thi từ vựng cho bạn...</p>
                     </div>
                 ) : (
-                    <div className="space-y-8">
+                    <div className="space-y-6">
                         {quizSubmitted && (
-                            <div className={`p-4 rounded-xl text-center ${quizScore >= 8 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                                <p className="text-lg font-bold">Kết quả: {quizScore}/10 điểm</p>
-                                <p className="text-sm">{quizScore >= 8 ? "Tuyệt vời! Bạn nắm rất chắc từ vựng." : "Hãy ôn tập thêm nhé!"}</p>
+                            <div className={`p-4 rounded-xl text-center border ${quizScore >= 8 ? 'bg-green-50 border-green-200 text-green-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800'}`}>
+                                <p className="text-2xl font-bold mb-1">{quizScore}/10</p>
+                                <p className="text-sm">{quizScore >= 8 ? "Xuất sắc! Bạn nắm rất chắc bài." : "Cần ôn tập thêm một chút nhé!"}</p>
                             </div>
                         )}
 
                         {quizQuestions.map((q, index) => (
-                            <div key={q.id} className="bg-gray-50 p-4 rounded-xl">
-                                <p className="font-semibold text-gray-800 mb-3">Câu {index + 1}: {q.question}</p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div key={q.id} className="bg-gray-50 p-4 md:p-6 rounded-xl border border-gray-100">
+                                <p className="font-semibold text-gray-800 mb-4 text-base md:text-lg">
+                                    <span className="text-blue-600 font-bold mr-2">Câu {index + 1}:</span> 
+                                    {q.question}
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     {q.options.map((opt) => {
-                                        let btnClass = "p-3 rounded-lg border text-left transition-all ";
+                                        let btnClass = "p-3 md:p-4 rounded-lg border text-left transition-all text-sm md:text-base ";
                                         if (quizSubmitted) {
-                                            if (opt === q.correctAnswer) btnClass += "bg-green-100 border-green-500 text-green-700 ";
+                                            if (opt === q.correctAnswer) btnClass += "bg-green-100 border-green-500 text-green-700 font-medium ";
                                             else if (userAnswers[q.id] === opt) btnClass += "bg-red-100 border-red-500 text-red-700 ";
-                                            else btnClass += "border-gray-200 opacity-50 ";
+                                            else btnClass += "border-gray-200 opacity-50 bg-white ";
                                         } else {
-                                            btnClass += userAnswers[q.id] === opt ? "bg-blue-100 border-blue-500 text-blue-700" : "bg-white border-gray-200 hover:bg-gray-100";
+                                            btnClass += userAnswers[q.id] === opt ? "bg-blue-100 border-blue-500 text-blue-700 font-medium shadow-sm" : "bg-white border-gray-200 hover:bg-gray-100 hover:border-blue-300";
                                         }
 
                                         return (
@@ -731,20 +980,37 @@ const App: React.FC = () => {
                                     })}
                                 </div>
                                 {quizSubmitted && (
-                                    <div className="mt-3 text-sm text-gray-600 italic">
-                                        💡 Giải thích: {q.explanation}
+                                    <div className={`mt-4 p-4 rounded-xl border text-sm ${userAnswers[q.id] === q.correctAnswer ? 'bg-green-50 border-green-100 text-green-800' : 'bg-red-50 border-red-100 text-gray-800'}`}>
+                                        {/* Show correct answer if wrong */}
+                                        {userAnswers[q.id] !== q.correctAnswer && (
+                                            <div className="mb-2 font-bold text-red-600 flex flex-wrap items-center gap-2 pb-2 border-b border-red-200/50">
+                                                <XCircleIcon className="w-5 h-5 shrink-0" />
+                                                <span>Bạn chọn: {userAnswers[q.id] || "Chưa chọn"}</span>
+                                                <span className="text-gray-400 mx-1">➜</span> 
+                                                <span className="text-green-600 flex items-center gap-1">
+                                                    <CheckCircleIcon className="w-5 h-5" /> 
+                                                    Đáp án đúng: {q.correctAnswer}
+                                                </span>
+                                            </div>
+                                        )}
+                                        
+                                        <div className="mt-2">
+                                            <span className="font-bold mr-1">💡 Giải thích:</span> {q.explanation}
+                                        </div>
                                     </div>
                                 )}
                             </div>
                         ))}
 
                         {!quizSubmitted && (
-                            <button 
-                                onClick={handleSubmitQuiz}
-                                className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold text-lg hover:shadow-lg transition-all"
-                            >
-                                Nộp Bài
-                            </button>
+                            <div className="pt-4">
+                                <button 
+                                    onClick={handleSubmitQuiz}
+                                    className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-bold text-lg hover:shadow-lg transition-all active:scale-[0.99]"
+                                >
+                                    Nộp Bài
+                                </button>
+                            </div>
                         )}
                     </div>
                 )}
@@ -752,28 +1018,55 @@ const App: React.FC = () => {
         ) : (
         <>
             {/* Translation Section */}
-            <section className="bg-white rounded-2xl shadow-lg p-6 relative" ref={searchContainerRef}>
-            <div className="flex items-center gap-2 mb-4">
-                <LanguageIcon className="w-5 h-5 text-indigo-500" />
-                <h2 className="font-semibold text-gray-700">Tra cứu nhanh</h2>
-            </div>
+            <section className="bg-white rounded-2xl shadow-lg p-5 md:p-8 border border-gray-100 relative z-20" ref={searchContainerRef}>
+                {/* Language Toggle Header */}
+                <div className="flex items-center justify-between mb-4 bg-gray-50 rounded-xl p-2 border border-gray-100">
+                    <div className={`flex-1 text-center py-2 rounded-lg text-sm font-semibold transition-colors ${direction === 'en_vi' ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-400'}`}>
+                        🇺🇸 Tiếng Anh
+                    </div>
+                    
+                    <button 
+                        onClick={handleToggleDirection}
+                        className="mx-2 p-2 rounded-full bg-white hover:bg-gray-100 text-gray-500 border border-gray-200 shadow-sm active:rotate-180 transition-all duration-300"
+                        title="Đổi chiều dịch"
+                    >
+                        <ArrowsRightLeftIcon className="w-5 h-5" />
+                    </button>
+
+                    <div className={`flex-1 text-center py-2 rounded-lg text-sm font-semibold transition-colors ${direction === 'vi_en' ? 'bg-white text-indigo-600 shadow-sm border border-gray-100' : 'text-gray-400'}`}>
+                        🇻🇳 Tiếng Việt
+                    </div>
+                </div>
             
-            <div className="relative">
-                <div className="flex flex-col md:flex-row gap-4">
-                    <div className="flex-1">
-                        <div className="relative">
-                            <input
-                                type="text"
-                                className="w-full p-4 pr-10 rounded-xl border border-gray-200 bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all text-lg"
-                                placeholder={direction === 'vi_en' ? "Nhập tiếng Việt..." : "Type in English..."}
+                <div className="relative">
+                    <div className="flex flex-col gap-4">
+                        {/* Input Area */}
+                        <div className="relative group">
+                            <textarea
+                                className="w-full p-4 md:p-5 pr-12 rounded-xl border border-gray-200 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:outline-none transition-all text-lg md:text-xl resize-none min-h-[120px] shadow-sm placeholder:text-gray-300"
+                                placeholder={direction === 'vi_en' ? "Nhập văn bản tiếng Việt..." : "Type English text here..."}
                                 value={inputText}
                                 onChange={(e) => setInputText(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleTranslate()}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleTranslate();
+                                    }
+                                }}
                             />
+                            {/* Voice Input Button */}
+                            <button
+                                onClick={handleVoiceInput}
+                                className={`absolute right-3 bottom-3 p-2 rounded-full transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-100 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                                title="Nhập bằng giọng nói"
+                            >
+                                <MicrophoneIcon className="w-5 h-5" />
+                            </button>
+
                             {inputText && (
                                 <button 
                                     onClick={() => { setInputText(''); setSuggestions([]); }}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                    className="absolute right-3 top-3 text-gray-300 hover:text-gray-500 p-1 hover:bg-gray-100 rounded-full transition-colors"
                                 >
                                     <XMarkIcon className="w-5 h-5" />
                                 </button>
@@ -781,146 +1074,193 @@ const App: React.FC = () => {
                             
                             {/* Suggestions Dropdown */}
                             {showSuggestions && suggestions.length > 0 && (
-                                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+                                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden ring-1 ring-black/5">
                                     {suggestions.map((item, idx) => (
                                         <div 
                                             key={idx}
                                             onClick={() => handleDropdownSelect(item)}
-                                            className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-gray-50 last:border-0 flex justify-between items-center group"
+                                            className="p-3 md:p-4 hover:bg-indigo-50 cursor-pointer border-b border-gray-50 last:border-0 flex justify-between items-center group transition-colors"
                                         >
-                                            <div>
-                                                <span className="font-medium text-gray-800">{item.word}</span>
-                                                <span className="text-xs text-gray-400 ml-2 border border-gray-200 rounded px-1">{item.type}</span>
+                                            <div className="flex items-center gap-3">
+                                                <span className="font-medium text-gray-800 text-base md:text-lg">{item.word}</span>
+                                                <span className="text-[10px] md:text-xs font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 uppercase">{item.type}</span>
                                             </div>
-                                            <span className="text-sm text-gray-500 group-hover:text-indigo-600">{item.meaning}</span>
+                                            <span className="text-sm text-gray-500 group-hover:text-indigo-600 font-medium">{item.meaning}</span>
                                         </div>
                                     ))}
                                 </div>
                             )}
                         </div>
+
+                        {/* Action Bar */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            {/* Quick Suggestions with Scroll */}
+                            <div className="order-2 md:order-1 flex-1 min-w-0">
+                                <ScrollableRow>
+                                    {QUICK_SUGGESTIONS[direction].map((text, i) => (
+                                        <button 
+                                            key={i} 
+                                            onClick={() => handleSuggestionClick(text)}
+                                            className="text-xs bg-gray-50 hover:bg-indigo-50 text-gray-500 hover:text-indigo-600 px-3 py-1.5 rounded-full transition-colors border border-gray-200 hover:border-indigo-200 whitespace-nowrap"
+                                        >
+                                            {text}
+                                        </button>
+                                    ))}
+                                </ScrollableRow>
+                            </div>
+
+                            {/* Translate Button */}
+                            <button
+                                className="order-1 md:order-2 bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-bold text-base hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] w-full md:w-auto min-w-[140px] shrink-0"
+                                onClick={handleTranslate}
+                                disabled={isLoadingTranslate || !inputText.trim()}
+                            >
+                                {isLoadingTranslate ? (
+                                    <>
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                        <span>Đang dịch...</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <LanguageIcon className="w-5 h-5" />
+                                        <span>Dịch ngay</span>
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
+                </div>
 
-                    <button 
-                        onClick={handleToggleDirection}
-                        className="self-center p-2 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
-                        title="Đổi chiều dịch"
-                    >
-                        <ArrowsRightLeftIcon className="w-6 h-6" />
-                    </button>
-
-                    <button
-                        className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[120px]"
-                        onClick={handleTranslate}
-                        disabled={isLoadingTranslate || !inputText.trim()}
-                    >
-                        {isLoadingTranslate ? (
-                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                        ) : (
-                        "Dịch ngay"
+                {/* Translation Result Card */}
+                {translatedResult && (
+                    <div className="mt-8 p-6 md:p-8 bg-indigo-50 rounded-2xl border border-indigo-100 animate-fade-in relative group transition-all">
+                        {/* Emoji Visual Icon (Improved Position) */}
+                        {translatedResult.emoji && (
+                            <div className="absolute top-2 right-2 md:top-6 md:right-6 text-5xl md:text-7xl opacity-90 drop-shadow-md select-none pointer-events-none animate-bounce-in">
+                                {translatedResult.emoji}
+                            </div>
                         )}
-                    </button>
-                </div>
-                
-                {/* Quick Suggestions */}
-                <div className="mt-4 flex flex-wrap gap-2">
-                    {QUICK_SUGGESTIONS[direction].map((text, i) => (
-                        <button 
-                            key={i} 
-                            onClick={() => handleSuggestionClick(text)}
-                            className="text-xs bg-gray-100 hover:bg-indigo-50 text-gray-600 hover:text-indigo-600 px-3 py-1.5 rounded-full transition-colors border border-transparent hover:border-indigo-100"
-                        >
-                            {text}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            {translatedResult && (
-                <div className="mt-6 p-6 bg-indigo-50 rounded-xl border border-indigo-100 animate-fade-in relative group">
-                <div className="flex justify-between items-start mb-2">
-                    <div>
-                        <div className="flex items-baseline gap-3">
-                            <h3 className="text-2xl font-bold text-gray-800">{translatedResult.english}</h3>
-                            <span className="text-sm font-mono text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
-                                /{translatedResult.phonetic}/
-                            </span>
+                        
+                        <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-4">
+                            <div className="flex-1">
+                                <div className="flex items-baseline flex-wrap gap-3">
+                                    <h3 className="text-3xl md:text-4xl font-bold text-gray-800 tracking-tight">{translatedResult.english}</h3>
+                                    <span className="text-base font-mono text-gray-500 bg-white px-3 py-1 rounded-lg border border-gray-200 shadow-sm">
+                                        /{translatedResult.phonetic}/
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2 mt-3">
+                                    <span className="text-xs font-bold text-indigo-600 bg-white px-2 py-1 rounded border border-indigo-100 uppercase tracking-wider">
+                                        {translatedResult.partOfSpeech}
+                                    </span>
+                                </div>
+                                {/* Verb Tenses Display */}
+                                {translatedResult.tenses && (translatedResult.tenses.past || translatedResult.tenses.present || translatedResult.tenses.future) && (
+                                    <div className="mt-4 bg-white/60 p-3 rounded-xl border border-indigo-100/50">
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase mb-2">Các thì cơ bản</p>
+                                        <div className="flex flex-wrap gap-2 text-sm">
+                                            {translatedResult.tenses.past && (
+                                                <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-gray-100 text-gray-600">
+                                                    <span className="text-[10px] font-bold text-gray-400">PAST</span>
+                                                    <span className="font-medium">{translatedResult.tenses.past}</span>
+                                                </div>
+                                            )}
+                                            {translatedResult.tenses.present && (
+                                                <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-gray-100 text-gray-600">
+                                                    <span className="text-[10px] font-bold text-gray-400">PRESENT</span>
+                                                    <span className="font-medium">{translatedResult.tenses.present}</span>
+                                                </div>
+                                            )}
+                                            {translatedResult.tenses.future && (
+                                                <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded border border-gray-100 text-gray-600">
+                                                    <span className="text-[10px] font-bold text-gray-400">FUTURE</span>
+                                                    <span className="font-medium">{translatedResult.tenses.future}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            {/* Audio Controls */}
+                            <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
+                                <div className="flex items-center gap-2 px-2">
+                                     <input 
+                                        type="range" 
+                                        min="0.7" 
+                                        max="1.3" 
+                                        step="0.1"
+                                        value={playbackSpeed}
+                                        onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+                                        className="w-16 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                        title={`Tốc độ: ${playbackSpeed}x`}
+                                     />
+                                     <span className="text-[10px] w-6 text-center font-mono text-gray-500">{playbackSpeed}x</span>
+                                </div>
+                                <div className="w-px h-6 bg-gray-200 mx-1"></div>
+                                <button 
+                                    onClick={() => handleAudioToggle('translate', translatedResult.sourceEnglish || translatedResult.english)}
+                                    className={`p-2.5 rounded-full transition-colors ${
+                                        activeAudioId === 'translate' 
+                                        ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-200' 
+                                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                    }`}
+                                >
+                                    {activeAudioId === 'translate' && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
+                                </button>
+                            </div>
                         </div>
-                        <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs font-semibold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded">
-                                {translatedResult.partOfSpeech}
-                            </span>
+                        
+                        <div className="text-gray-700 italic mt-6 border-t border-indigo-200/50 pt-4 flex items-start gap-3 bg-white/50 p-4 rounded-xl">
+                            <SparklesIcon className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                            <span className="flex-1 text-base leading-relaxed">{translatedResult.usageHint}</span>
+                            <button
+                                 onClick={() => handleAudioToggle('hint', translatedResult.usageHint)}
+                                 className={`p-2 rounded-full transition-colors flex-shrink-0 ${
+                                     activeAudioId === 'hint' 
+                                     ? 'bg-amber-100 text-amber-600' 
+                                     : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'
+                                 }`}
+                                 title="Nghe ví dụ"
+                             >
+                                 {activeAudioId === 'hint' && !isPaused ? <PauseIcon className="w-4 h-4" /> : <SpeakerWaveIcon className="w-4 h-4" />}
+                             </button>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-2 bg-white rounded-lg p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                             <input 
-                                type="range" 
-                                min="0.7" 
-                                max="1.3" 
-                                step="0.1"
-                                value={playbackSpeed}
-                                onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-                                className="w-16 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                                title={`Tốc độ: ${playbackSpeed}x`}
-                             />
-                             <span className="text-[10px] w-6 text-center text-gray-500">{playbackSpeed}x</span>
-                        </div>
-                        <button 
-                            onClick={() => handleAudioToggle('translate', translatedResult.sourceEnglish || translatedResult.english)}
-                            className={`p-2 rounded-full transition-colors ${
-                                activeAudioId === 'translate' 
-                                ? 'bg-indigo-600 text-white shadow-md' 
-                                : 'bg-white text-gray-600 hover:bg-gray-100'
-                            }`}
-                        >
-                            {activeAudioId === 'translate' && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
-                        </button>
-                    </div>
-                </div>
-                
-                <div className="text-gray-600 italic mt-3 border-t border-indigo-100 pt-3 flex items-start gap-2">
-                    <SparklesIcon className="w-4 h-4 text-amber-500 mt-1 flex-shrink-0" />
-                    <span className="flex-1">{translatedResult.usageHint}</span>
-                    <button
-                         onClick={() => handleAudioToggle('hint', translatedResult.usageHint)}
-                         className={`p-1.5 rounded-full transition-colors flex-shrink-0 ${
-                             activeAudioId === 'hint' 
-                             ? 'bg-amber-100 text-amber-600' 
-                             : 'text-gray-400 hover:text-amber-500 hover:bg-amber-50'
-                         }`}
-                         title="Nghe ví dụ"
-                     >
-                         {activeAudioId === 'hint' && !isPaused ? <PauseIcon className="w-4 h-4" /> : <SpeakerWaveIcon className="w-4 h-4" />}
-                     </button>
-                </div>
-                </div>
-            )}
+                )}
             </section>
 
             {/* Vocabulary List */}
-            <section>
-            <div className="flex items-center justify-between mb-4">
+            <section className="mt-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-4">
                 <div className="flex items-center gap-2">
-                <ClockIcon className="w-5 h-5 text-orange-500" />
-                <h2 className="font-semibold text-gray-700">Kho từ vựng của bạn</h2>
-                <span className="bg-gray-200 text-gray-600 text-xs px-2 py-0.5 rounded-full">
-                    {history.length}
-                </span>
+                    <div className="bg-orange-100 p-2 rounded-lg">
+                        <ClockIcon className="w-5 h-5 text-orange-600" />
+                    </div>
+                    <div>
+                        <h2 className="font-bold text-gray-800 text-lg">Kho từ vựng</h2>
+                        <p className="text-xs text-gray-500">{history.length} từ đã lưu</p>
+                    </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 w-full sm:w-auto">
                      <button 
                         onClick={handleStartQuiz}
-                        className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors"
+                        className={`flex-1 sm:flex-none text-sm flex items-center justify-center gap-2 border px-4 py-2 rounded-xl transition-all font-medium ${
+                            !customApiKey 
+                            ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed opacity-70' 
+                            : 'text-blue-700 bg-blue-50 hover:bg-blue-100 border-blue-200'
+                        }`}
+                        title={!customApiKey ? "Vui lòng nhập API Key để sử dụng" : ""}
                      >
-                        <ClipboardDocumentCheckIcon className="w-4 h-4" />
-                        Tạo Bài Kiểm Tra
+                        {!customApiKey ? <LockClosedIcon className="w-4 h-4" /> : <ClipboardDocumentCheckIcon className="w-4 h-4" />}
+                        Kiểm Tra
                     </button>
                     <button 
                         onClick={handleClearHistory}
-                        className="text-xs flex items-center gap-1 text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors"
+                        className="flex-1 sm:flex-none text-sm flex items-center justify-center gap-2 text-red-600 bg-white hover:bg-red-50 border border-red-200 px-4 py-2 rounded-xl transition-all font-medium"
                     >
                         <TrashIcon className="w-4 h-4" />
-                        Xóa lịch sử
+                        Xóa tất cả
                     </button>
                 </div>
             </div>
@@ -933,17 +1273,17 @@ const App: React.FC = () => {
                         count={group.items.length} 
                         defaultOpen={groupIdx === 0}
                     >
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                             {group.items.map((item) => (
                                 <div 
                                     key={item.id} 
-                                    className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer group relative active:scale-[0.98]"
+                                    className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-indigo-100 transition-all cursor-pointer group relative active:scale-[0.98]"
                                     onClick={() => handleAudioToggle(item.id, item.english, false)}
                                 >
                                     <div className="flex justify-between items-start">
-                                        <div>
-                                            <p className="font-bold text-gray-800">{item.english}</p>
-                                            <p className="text-sm text-gray-500 mt-0.5">{item.vietnamese}</p>
+                                        <div className="pr-6">
+                                            <p className="font-bold text-gray-800 text-lg">{item.english}</p>
+                                            <p className="text-sm text-gray-500 mt-1 line-clamp-1">{item.vietnamese}</p>
                                         </div>
                                         <div className="flex flex-col items-end gap-1">
                                             {item.partOfSpeech && (
@@ -956,7 +1296,7 @@ const App: React.FC = () => {
                                     {/* Delete Button */}
                                     <button
                                         onClick={(e) => handleDeleteWord(item.id, e)}
-                                        className="absolute -top-2 -right-2 bg-red-100 text-red-500 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-200"
+                                        className="absolute -top-2 -right-2 bg-white text-gray-400 border border-gray-200 hover:text-red-500 hover:border-red-200 p-1.5 rounded-full shadow-sm opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all"
                                     >
                                         <XMarkIcon className="w-3 h-3" />
                                     </button>
@@ -966,73 +1306,97 @@ const App: React.FC = () => {
                     </DateAccordion>
                 ))}
                 {history.length === 0 && (
-                    <div className="text-center py-10 text-gray-400 bg-white rounded-xl border border-dashed border-gray-200">
-                        <BookOpenIcon className="w-12 h-12 mx-auto mb-2 opacity-20" />
-                        <p>Chưa có từ vựng nào. Hãy tra cứu để bắt đầu!</p>
+                    <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border border-dashed border-gray-200">
+                        <BookOpenIcon className="w-16 h-16 mx-auto mb-4 opacity-10" />
+                        <p className="text-lg">Chưa có từ vựng nào.</p>
+                        <p className="text-sm mt-1">Hãy tra cứu từ mới để bắt đầu xây dựng kho từ vựng!</p>
                     </div>
                 )}
             </div>
             </section>
 
             {/* Stories Section */}
-            <section>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <section className="mt-8">
+            <div className="flex flex-col gap-6 mb-6">
                 <div className="flex items-center gap-2">
-                    <SparklesIcon className="w-5 h-5 text-purple-500" />
-                    <h2 className="font-semibold text-gray-700">Ôn tập qua truyện</h2>
+                    <div className="bg-purple-100 p-2 rounded-lg">
+                        <SparklesIcon className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <h2 className="font-bold text-gray-800 text-lg">Ôn tập qua truyện</h2>
                 </div>
                 
-                {/* Story Controls */}
-                <div className="flex flex-col gap-3">
-                     <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                         {SUGGESTED_THEMES.map(theme => (
-                             <button
-                                key={theme}
-                                onClick={() => setStoryTheme(theme)}
-                                className={`whitespace-nowrap px-3 py-1 rounded-full text-xs border transition-all ${
-                                    storyTheme === theme 
-                                    ? 'bg-purple-100 border-purple-300 text-purple-700' 
-                                    : 'bg-white border-gray-200 text-gray-600 hover:border-purple-200'
-                                }`}
-                             >
-                                 {theme}
-                             </button>
-                         ))}
-                     </div>
-                     
-                     <div className="flex items-stretch gap-2">
-                        <div className="flex bg-white rounded-lg border border-gray-200 p-1">
+                {/* Story Controls Card */}
+                <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+                     <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="flex bg-gray-100 rounded-xl p-1 shrink-0">
                             <button
                                 onClick={() => setStoryType('story')}
-                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                                    storyType === 'story' ? 'bg-purple-100 text-purple-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'
+                                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                    storyType === 'story' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                                 }`}
                             >
                                 Truyện ngắn
                             </button>
                             <button
                                 onClick={() => setStoryType('dialogue')}
-                                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                                    storyType === 'dialogue' ? 'bg-purple-100 text-purple-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'
+                                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                    storyType === 'dialogue' ? 'bg-white text-purple-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                                 }`}
                             >
                                 Hội thoại
                             </button>
                         </div>
-                        <input 
-                            type="text" 
-                            placeholder="Chủ đề tùy chọn..."
-                            className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-purple-400"
-                            value={storyTheme}
-                            onChange={(e) => setStoryTheme(e.target.value)}
-                        />
-                         <button
-                            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 shadow-sm whitespace-nowrap"
-                            onClick={() => handleGenerateStory(true)}
-                            disabled={isLoadingStory || history.length < 5}
-                        >
-                            {isLoadingStory ? "Đang viết..." : "Tạo truyện mới"}
-                        </button>
+                        <div className="flex-1 flex gap-2">
+                            <input 
+                                type="text" 
+                                placeholder="Nhập chủ đề tùy chọn..."
+                                className="flex-1 px-4 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-purple-100 focus:border-purple-300 transition-all"
+                                value={storyTheme}
+                                onChange={(e) => setStoryTheme(e.target.value)}
+                            />
+                             <button
+                                className={`px-6 py-2 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all whitespace-nowrap flex items-center gap-2 ${
+                                    !customApiKey || isLoadingStory || history.length < 5
+                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'
+                                    : 'bg-purple-600 text-white hover:bg-purple-700'
+                                }`}
+                                onClick={() => handleGenerateStory(true)}
+                                disabled={isLoadingStory || history.length < 5}
+                            >
+                                {isLoadingStory ? (
+                                    "Đang viết..." 
+                                ) : !customApiKey ? (
+                                    <>
+                                        <LockClosedIcon className="w-4 h-4" />
+                                        <span>Khóa</span>
+                                    </>
+                                ) : (
+                                    "Tạo mới"
+                                )}
+                            </button>
+                        </div>
+                     </div>
+                     
+                     {/* Theme Suggestions with Horizontal Scroll */}
+                     <div className="flex items-center gap-2">
+                         <span className="text-xs font-bold text-gray-400 uppercase tracking-wide mr-1 shrink-0">Gợi ý:</span>
+                         <div className="flex-1 min-w-0">
+                            <ScrollableRow>
+                                {SUGGESTED_THEMES.map(theme => (
+                                    <button
+                                        key={theme}
+                                        onClick={() => setStoryTheme(theme)}
+                                        className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                                            storyTheme === theme 
+                                            ? 'bg-purple-50 border-purple-200 text-purple-700' 
+                                            : 'bg-white border-gray-200 text-gray-600 hover:border-purple-200 hover:text-purple-600'
+                                        }`}
+                                    >
+                                        {theme}
+                                    </button>
+                                ))}
+                            </ScrollableRow>
+                         </div>
                      </div>
                 </div>
             </div>
@@ -1045,100 +1409,165 @@ const App: React.FC = () => {
                         count={group.items.length}
                         defaultOpen={groupIdx === 0}
                     >
-                        <div className="space-y-6">
+                        <div className="space-y-8">
                             {group.items.map((story) => (
                                 <article key={story.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden group">
-                                    <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-                                    <div className="flex items-center gap-3">
-                                        <div className="bg-purple-100 p-2 rounded-lg">
-                                            <BookOpenIcon className="w-5 h-5 text-purple-600" />
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-800">{story.theme}</p>
-                                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                                                <span>{new Date(story.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
-                                                {story.generationTimeMs && (
-                                                    <span className="flex items-center gap-0.5 bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-100">
-                                                        ⚡ {(story.generationTimeMs / 1000).toFixed(1)}s
-                                                    </span>
-                                                )}
+                                    <div className="bg-gray-50 px-5 py-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
+                                                <BookOpenIcon className="w-5 h-5 text-purple-600" />
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-gray-800 text-base">{story.theme}</p>
+                                                <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
+                                                    <span>{new Date(story.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                    {story.generationTimeMs && (
+                                                        <span className="flex items-center gap-0.5 bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-100">
+                                                            ⚡ {(story.generationTimeMs / 1000).toFixed(1)}s
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        {/* Voice Selector */}
-                                        <div className="hidden sm:flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-gray-200">
-                                            <select 
-                                                value={selectedVoice}
-                                                onChange={(e) => setSelectedVoice(e.target.value)}
-                                                className="text-xs bg-transparent border-none focus:ring-0 text-gray-600 cursor-pointer outline-none w-24"
-                                            >
-                                                {VOICE_OPTIONS.map(v => (
-                                                    <option key={v.id} value={v.id}>{v.label}</option>
-                                                ))}
-                                            </select>
+                                        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                                            {/* Cloze Test Button */}
+                                            {clozeStoryId !== story.id && (
+                                                <button
+                                                    onClick={() => handleStartClozeTest(story.id, story.content)}
+                                                    className="p-2 bg-white text-indigo-600 border border-indigo-100 hover:bg-indigo-50 rounded-lg flex items-center gap-1.5 text-xs font-bold transition-all shadow-sm"
+                                                    title="Luyện nghe điền từ"
+                                                >
+                                                    <PencilSquareIcon className="w-4 h-4" />
+                                                    <span className="hidden sm:inline">Kiểm tra</span>
+                                                </button>
+                                            )}
+
+                                            {/* Voice Selector */}
+                                            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 shadow-sm">
+                                                <select 
+                                                    value={selectedVoice}
+                                                    onChange={(e) => setSelectedVoice(e.target.value)}
+                                                    className="text-xs font-medium bg-transparent border-none focus:ring-0 text-gray-600 cursor-pointer outline-none"
+                                                >
+                                                    {VOICE_OPTIONS.map(v => (
+                                                        <option key={v.id} value={v.id}>{v.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            
+                                            {/* Audio Controls */}
+                                            <div className="relative">
+                                                <button 
+                                                    onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
+                                                    className={`p-2 rounded-full transition-all flex items-center justify-center gap-2 relative overflow-hidden ${
+                                                        activeAudioId === story.id 
+                                                        ? 'bg-purple-600 text-white shadow-md ring-2 ring-purple-200' 
+                                                        : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50 hover:text-purple-600'
+                                                    }`}
+                                                >
+                                                    {isLoadingAudio && activeAudioId === story.id ? (
+                                                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                    ) : (
+                                                        activeAudioId === story.id && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />
+                                                    )}
+                                                </button>
+                                            </div>
+                                            
+                                            <button onClick={() => handleDeleteStory(story.id)} className="text-gray-400 hover:text-red-500 p-2 hover:bg-red-50 rounded-full transition-colors">
+                                                <TrashIcon className="w-5 h-5" />
+                                            </button>
                                         </div>
-                                        
-                                        {/* Audio Controls */}
-                                        <button 
-                                            onClick={() => handleAudioToggle(story.id, story.content, true, story.theme.includes('Hội thoại'))}
-                                            className={`p-2.5 rounded-full transition-all flex items-center gap-2 ${
-                                                activeAudioId === story.id 
-                                                ? 'bg-purple-600 text-white shadow-md' 
-                                                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                                            }`}
-                                        >
-                                            {activeAudioId === story.id && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
-                                        </button>
-                                        
-                                        <button onClick={() => handleDeleteStory(story.id)} className="text-gray-400 hover:text-red-500 p-2">
-                                            <TrashIcon className="w-5 h-5" />
-                                        </button>
                                     </div>
-                                    </div>
+
+                                    {/* Audio Progress Bar */}
+                                    {activeAudioId === story.id && (
+                                        <div className="h-1.5 w-full bg-gray-100 overflow-hidden">
+                                            <div 
+                                                className="h-full bg-gradient-to-r from-purple-400 to-purple-600 transition-all duration-300 ease-linear"
+                                                style={{ width: `${audioProgress * 100}%` }}
+                                            ></div>
+                                        </div>
+                                    )}
                                     
-                                    <div className="p-6">
+                                    <div className="p-5 md:p-8">
+                                        {/* Cloze Test Controls (Visible only when active) */}
+                                        {clozeStoryId === story.id && (
+                                            <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-wrap items-center justify-between gap-4 animate-fade-in">
+                                                <div className="text-sm text-indigo-800 font-medium flex items-center gap-2">
+                                                    <PencilSquareIcon className="w-5 h-5" />
+                                                    Chế độ luyện nghe điền từ
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    {!clozeSubmitted ? (
+                                                        <button 
+                                                            onClick={handleSubmitCloze}
+                                                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 shadow-sm"
+                                                        >
+                                                            Nộp bài
+                                                        </button>
+                                                    ) : (
+                                                        <button 
+                                                            onClick={() => handleStartClozeTest(story.id, story.content)}
+                                                            className="px-4 py-2 bg-white text-indigo-600 border border-indigo-200 text-sm font-bold rounded-lg hover:bg-indigo-50"
+                                                        >
+                                                            Làm lại
+                                                        </button>
+                                                    )}
+                                                    <button 
+                                                        onClick={handleExitClozeTest}
+                                                        className="px-4 py-2 bg-white text-gray-600 border border-gray-200 text-sm font-bold rounded-lg hover:bg-gray-50"
+                                                    >
+                                                        Thoát
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Interactive Story Content */}
                                         <div 
-                                            className="prose prose-lg max-w-none mb-6 relative"
+                                            className="prose prose-lg max-w-none mb-8 relative"
                                             onMouseUp={handleSelectionLookup}
                                             onTouchEnd={handleSelectionLookup}
                                         >
-                                            <div className="text-gray-800 leading-relaxed font-serif text-lg tracking-wide whitespace-pre-line selection:bg-purple-200 selection:text-purple-900">
-                                                {/* We render raw text and highlight via dangerouslySetInnerHTML but with safe content */}
+                                            <div className="text-gray-800 leading-relaxed font-serif text-lg tracking-wide whitespace-pre-line selection:bg-purple-100 selection:text-purple-900">
                                                 <InteractiveStoryText 
                                                     htmlContent={story.content} 
                                                     onWordClick={(word) => handleWordClick(word, story.content, null)}
                                                     highlightIndex={activeAudioId === story.id ? highlightedWordIndex : -1}
+                                                    isClozeMode={clozeStoryId === story.id}
+                                                    hiddenIndices={clozeHiddenIndices}
+                                                    userInputs={userClozeInputs}
+                                                    onInputChange={handleClozeInputChange}
+                                                    isSubmitted={clozeSubmitted}
                                                 />
                                             </div>
                                             
                                             {/* Floating Lookup Button */}
                                             {selectionPopup && (
                                                 <div 
-                                                    className="selection-popup fixed z-50 transform -translate-x-1/2 -translate-y-full mb-2"
+                                                    className="selection-popup fixed z-50 transform -translate-x-1/2 -translate-y-full mb-3"
                                                     style={{ left: selectionPopup.x, top: selectionPopup.y }}
                                                 >
                                                     <button
                                                         onClick={() => handleWordClick(selectionPopup.text, story.content, null)}
-                                                        className="bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1 hover:bg-black transition-colors"
+                                                        className="bg-gray-900/90 backdrop-blur text-white text-xs px-4 py-2 rounded-full shadow-xl flex items-center gap-2 hover:bg-black transition-all animate-bounce-in"
                                                     >
                                                         <BookOpenIcon className="w-3 h-3" />
-                                                        Tra cứu
+                                                        Tra cứu nhanh
                                                     </button>
-                                                    <div className="w-2 h-2 bg-gray-900 rotate-45 absolute left-1/2 -bottom-1 -translate-x-1/2"></div>
+                                                    <div className="w-2 h-2 bg-gray-900/90 rotate-45 absolute left-1/2 -bottom-1 -translate-x-1/2"></div>
                                                 </div>
                                             )}
                                         </div>
 
                                         {/* Controls Bar */}
-                                        <div className="flex flex-wrap items-center gap-4 border-t border-gray-100 pt-4">
+                                        <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-6">
                                             <button 
                                                 onClick={() => toggleVietnamese(story.id)}
-                                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
+                                                className={`text-sm px-4 py-2.5 rounded-xl font-medium transition-colors ${
                                                     showVietnamese[story.id] 
-                                                    ? 'bg-blue-50 text-blue-700' 
-                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                                    ? 'bg-blue-50 text-blue-700 border border-blue-100' 
+                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-transparent'
                                                 }`}
                                             >
                                                 {showVietnamese[story.id] ? "Ẩn dịch nghĩa" : "Xem dịch nghĩa"}
@@ -1146,10 +1575,10 @@ const App: React.FC = () => {
 
                                             <button 
                                                 onClick={() => toggleGrammar(story.id)}
-                                                className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-1 ${
+                                                className={`text-sm px-4 py-2.5 rounded-xl font-medium transition-colors flex items-center gap-2 ${
                                                     showGrammar[story.id] 
-                                                    ? 'bg-teal-50 text-teal-700' 
-                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                                                    ? 'bg-teal-50 text-teal-700 border border-teal-100' 
+                                                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-transparent'
                                                 }`}
                                             >
                                                 <AcademicCapIcon className="w-4 h-4" />
@@ -1159,34 +1588,39 @@ const App: React.FC = () => {
 
                                         {/* Vietnamese Translation */}
                                         {showVietnamese[story.id] && (
-                                            <div className="mt-4 p-4 bg-blue-50 rounded-xl text-gray-700 text-base leading-relaxed border border-blue-100 animate-fade-in">
-                                                <h4 className="text-xs font-bold text-blue-400 uppercase mb-2">Bản dịch tiếng Việt</h4>
+                                            <div className="mt-6 p-6 bg-blue-50/50 rounded-2xl text-gray-700 text-base leading-relaxed border border-blue-100 animate-fade-in">
+                                                <h4 className="text-xs font-bold text-blue-500 uppercase mb-3 flex items-center gap-2">
+                                                    <LanguageIcon className="w-4 h-4" />
+                                                    Bản dịch tiếng Việt
+                                                </h4>
                                                 {story.vietnameseContent}
                                             </div>
                                         )}
                                         
                                         {/* Grammar Analysis */}
                                         {showGrammar[story.id] && (
-                                            <div className="mt-4 p-5 bg-teal-50 rounded-xl border border-teal-100 animate-fade-in">
-                                                <h4 className="text-sm font-bold text-teal-800 uppercase mb-3 flex items-center gap-2">
-                                                    <SparklesIcon className="w-4 h-4" />
+                                            <div className="mt-6 p-6 bg-teal-50/50 rounded-2xl border border-teal-100 animate-fade-in">
+                                                <h4 className="text-sm font-bold text-teal-800 uppercase mb-4 flex items-center gap-2">
+                                                    <SparklesIcon className="w-4 h-4 text-teal-600" />
                                                     Góc Ngữ Pháp
                                                 </h4>
                                                 {story.grammarPoints && story.grammarPoints.length > 0 ? (
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                         {story.grammarPoints.map((point, idx) => (
-                                                            <div key={idx} className="bg-white p-3 rounded-lg shadow-sm border border-teal-100/50">
-                                                                <p className="font-bold text-teal-700 text-sm mb-1">{point.structure}</p>
-                                                                <p className="text-gray-600 text-xs mb-2">{point.explanation}</p>
-                                                                <div className="bg-gray-50 p-2 rounded text-xs text-gray-500 italic border-l-2 border-teal-300">
+                                                            <div key={idx} className="bg-white p-4 rounded-xl shadow-sm border border-teal-100/50 hover:shadow-md transition-shadow">
+                                                                <p className="font-bold text-teal-700 text-sm mb-2 border-b border-gray-100 pb-2">{point.structure}</p>
+                                                                <p className="text-gray-600 text-sm mb-3">{point.explanation}</p>
+                                                                <div className="bg-gray-50 p-2.5 rounded-lg text-xs text-gray-500 italic border-l-4 border-teal-300 mb-2">
                                                                     "{point.exampleInStory}"
                                                                 </div>
-                                                                <p className="mt-2 text-[10px] text-teal-600 font-medium">💡 Mẹo: {point.memoryTip}</p>
+                                                                <p className="text-xs text-teal-600 font-medium flex items-center gap-1">
+                                                                    💡 <span className="text-gray-500 font-normal">{point.memoryTip}</span>
+                                                                </p>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 ) : (
-                                                    <p className="text-sm text-gray-500 italic">Dữ liệu ngữ pháp chưa có cho câu chuyện này.</p>
+                                                    <p className="text-sm text-gray-500 italic text-center py-4">Dữ liệu ngữ pháp chưa có cho câu chuyện này.</p>
                                                 )}
                                             </div>
                                         )}
@@ -1205,49 +1639,55 @@ const App: React.FC = () => {
 
       {/* Word Definition Modal */}
       {selectedWord && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedWord(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100" onClick={e => e.stopPropagation()}>
-            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 px-6 py-4 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-white capitalize">{selectedWord.word}</h3>
-              <button onClick={() => setSelectedWord(null)} className="text-white/80 hover:text-white">
-                <XMarkIcon className="w-6 h-6" />
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={() => setSelectedWord(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100 border border-gray-200" onClick={e => e.stopPropagation()}>
+            <div className="bg-gradient-to-br from-indigo-600 to-blue-600 px-6 py-5 flex justify-between items-center relative overflow-hidden">
+              <div className="absolute inset-0 bg-white/10 opacity-50 pattern-grid"></div>
+              <div className="flex items-center gap-3 relative z-10">
+                <h3 className="text-2xl font-bold text-white capitalize">{selectedWord.word}</h3>
+                {selectedWord.emoji && <span className="text-4xl filter drop-shadow-md">{selectedWord.emoji}</span>}
+              </div>
+              <button onClick={() => setSelectedWord(null)} className="text-white/80 hover:text-white bg-white/20 hover:bg-white/30 p-1.5 rounded-full transition-colors relative z-10">
+                <XMarkIcon className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="p-6">
+            <div className="p-6 md:p-8">
                {isLookingUp && selectedWord.meaning === 'Đang tra cứu...' ? (
                    <div className="flex flex-col items-center justify-center py-8 text-gray-400">
-                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
-                       <p>Đang tra cứu thông minh...</p>
+                       <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4"></div>
+                       <p className="font-medium">AI đang tra cứu...</p>
                    </div>
                ) : (
-                   <div className="space-y-4">
+                   <div className="space-y-6">
                         <div className="flex items-center gap-3">
-                            <span className="font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded text-sm border border-gray-200">/{selectedWord.phonetic}/</span>
-                            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded uppercase tracking-wide border border-indigo-100">{selectedWord.type}</span>
+                            <span className="font-mono text-gray-600 bg-gray-100 px-3 py-1.5 rounded-lg text-sm border border-gray-200">/{selectedWord.phonetic}/</span>
+                            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1.5 rounded-lg uppercase tracking-wide border border-indigo-100">{selectedWord.type}</span>
                         </div>
                         
                         <div>
-                            <p className="text-gray-400 text-xs font-bold uppercase mb-1">Định nghĩa</p>
-                            <p className="text-gray-800 font-medium text-lg leading-snug">{selectedWord.meaning}</p>
+                            <p className="text-gray-400 text-xs font-bold uppercase mb-1.5">Định nghĩa</p>
+                            <p className="text-gray-800 font-medium text-xl leading-relaxed">{selectedWord.meaning}</p>
                         </div>
 
                         {selectedWord.example && (
-                            <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
-                                <p className="text-amber-600 text-xs font-bold uppercase mb-1">Ví dụ / Ghi chú</p>
-                                <p className="text-gray-700 italic text-sm">"{selectedWord.example}"</p>
+                            <div className="bg-amber-50 p-4 rounded-xl border border-amber-100">
+                                <p className="text-amber-600 text-xs font-bold uppercase mb-1.5 flex items-center gap-1">
+                                    <SparklesIcon className="w-3 h-3" /> Ví dụ
+                                </p>
+                                <p className="text-gray-700 italic text-base leading-relaxed">"{selectedWord.example}"</p>
                             </div>
                         )}
                         
-                        <div className="pt-4 border-t border-gray-100 flex justify-end">
+                        <div className="pt-6 border-t border-gray-100 flex justify-end">
                             <button 
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     handleAudioToggle('lookup', selectedWord.word);
                                 }}
-                                className="flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-full transition-colors"
+                                className="flex items-center gap-2 text-sm font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-6 py-3 rounded-xl transition-colors shadow-sm"
                             >
-                                <SpeakerWaveIcon className="w-4 h-4" />
+                                <SpeakerWaveIcon className="w-5 h-5" />
                                 Nghe phát âm
                             </button>
                         </div>
@@ -1257,105 +1697,251 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Settings Modal (API Key) */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowSettings(false)}>
+            <div className="bg-white rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                        <Cog6ToothIcon className="w-6 h-6 text-gray-500" /> Cài đặt
+                    </h3>
+                    <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-gray-600">
+                        <XMarkIcon className="w-6 h-6" />
+                    </button>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-4">
+                        <h4 className="font-bold text-indigo-800 text-sm mb-1 flex items-center gap-1">
+                            <LockClosedIcon className="w-4 h-4" />
+                            Quyền Hạn API
+                        </h4>
+                        <ul className="text-xs text-indigo-700 space-y-1 list-disc list-inside">
+                            <li><span className="font-bold">Key mặc định:</span> Chỉ dùng cho Dịch Thuật.</li>
+                            <li><span className="font-bold">Key riêng (Của bạn):</span> Mở khóa Tạo Truyện, Hội thoại và Kiểm tra từ vựng.</li>
+                        </ul>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-2">Gemini API Key của bạn</label>
+                        <p className="text-xs text-gray-500 mb-2">
+                            Key sẽ được lưu an toàn trên trình duyệt của bạn (Local Storage) và không bao giờ được chia sẻ.
+                        </p>
+                        <div className="relative">
+                            <input 
+                                type={showApiKey ? "text" : "password"}
+                                value={tempApiKey}
+                                onChange={(e) => setTempApiKey(e.target.value)}
+                                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none pr-12 font-mono text-sm"
+                                placeholder="AIzaSy..."
+                            />
+                            <button 
+                                onClick={() => setShowApiKey(!showApiKey)}
+                                className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+                            >
+                                {showApiKey ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mt-8 flex justify-end gap-3">
+                     <button 
+                        onClick={() => setShowSettings(false)}
+                        className="px-5 py-2.5 rounded-xl text-gray-600 font-medium hover:bg-gray-100 transition-colors"
+                     >
+                        Hủy
+                    </button>
+                    <button 
+                        onClick={handleSaveApiKey}
+                        className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 shadow-md transition-colors"
+                    >
+                        Lưu & Mở Khóa
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Congratulation Popup */}
+      {showCongratulation && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl animate-bounce-in">
+                <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-yellow-100/50 to-transparent pointer-events-none"></div>
+                <div className="bg-yellow-100 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 relative z-10 animate-pulse">
+                    <TrophyIcon className="w-12 h-12 text-yellow-600" />
+                </div>
+                <h3 className="text-2xl font-bold text-gray-800 mb-2">Chúc mừng! 🎉</h3>
+                <p className="text-gray-600 mb-6">Bạn đã học chăm chỉ được <span className="font-bold text-indigo-600">10 phút</span> rồi. Hãy cố gắng giữ vững phong độ nhé!</p>
+                <button 
+                    onClick={() => setShowCongratulation(false)}
+                    className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-lg hover:shadow-indigo-200"
+                >
+                    Tuyệt vời!
+                </button>
+            </div>
+        </div>
+      )}
     </div>
   );
 };
 
 // --- New Component: Date Accordion ---
 const DateAccordion: React.FC<{ title: string; count: number; children: React.ReactNode; defaultOpen?: boolean }> = ({ title, count, children, defaultOpen = false }) => {
-    const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm transition-all duration-300">
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between p-4 bg-gray-50/50 hover:bg-gray-100/80 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+            <h3 className="font-bold text-gray-700 text-base md:text-lg">{title}</h3>
+            <span className="text-xs bg-white border border-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium shadow-sm">
+                {count} mục
+            </span>
+        </div>
+        <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      
+      <div 
+        className={`transition-all duration-500 ease-in-out overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}
+      >
+        <div className="p-4 bg-white border-t border-gray-100">
+            {children}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- New Component: Scrollable Horizontal Row ---
+const ScrollableRow: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    const scroll = (offset: number) => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+        }
+    };
 
     return (
-        <div className="border border-gray-100 rounded-xl overflow-hidden bg-white mb-4 shadow-sm hover:shadow-md transition-shadow">
+        <div className="relative group">
             <button 
-                onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                onClick={() => scroll(-200)}
+                className="absolute left-0 top-1/2 -translate-y-1/2 z-10 bg-white/90 p-1 rounded-full shadow-md border border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0 -ml-2"
             >
-                <div>
-                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">{title}</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">{count} mục</p>
-                </div>
-                <div className={`transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}>
-                    <ChevronDownIcon className="w-5 h-5 text-gray-400" />
-                </div>
+                <ChevronLeftIcon className="w-4 h-4 text-gray-600" />
             </button>
             
-            <div className={`transition-all duration-300 ease-in-out ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}>
-                <div className="p-4 bg-white border-t border-gray-100">
-                    {children}
-                </div>
+            <div 
+                ref={scrollRef}
+                className="flex items-center gap-2 overflow-x-auto scrollbar-hide py-1 px-1 scroll-smooth"
+            >
+                {children}
             </div>
+
+            <button 
+                onClick={() => scroll(200)}
+                className="absolute right-0 top-1/2 -translate-y-1/2 z-10 bg-white/90 p-1 rounded-full shadow-md border border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity -mr-2"
+            >
+                <ChevronRightIcon className="w-4 h-4 text-gray-600" />
+            </button>
         </div>
     );
 };
 
-// Helper component for interactive text highlighting
-const InteractiveStoryText: React.FC<{ 
-    htmlContent: string; 
-    onWordClick: (word: string) => void;
-    highlightIndex: number;
-}> = React.memo(({ htmlContent, onWordClick, highlightIndex }) => {
-    // 1. Parse HTML to keep structure but make words interactive
-    // 2. We split by spaces but preserve tags like <b>
-    
-    // A simplified parser that wraps text nodes in spans
-    const createMarkup = () => {
-        // Remove existing b tags for processing, or keep them? 
-        // Better strategy: Split by spaces, render words. If word was inside <b>, keep bold style.
-        // This is complex for React. Let's do a simpler approach:
-        // Use a temp div to parse HTML
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = htmlContent;
-        
-        let wordCounter = 0;
+// --- Updated Component: InteractiveStoryText ---
+const InteractiveStoryText: React.FC<{
+  htmlContent: string;
+  onWordClick: (word: string) => void;
+  highlightIndex: number;
+  isClozeMode: boolean;
+  hiddenIndices: number[];
+  userInputs: Record<number, string>;
+  onInputChange: (index: number, value: string) => void;
+  isSubmitted: boolean;
+}> = ({ htmlContent, onWordClick, highlightIndex, isClozeMode, hiddenIndices, userInputs, onInputChange, isSubmitted }) => {
+  
+  // Parse content safely
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = htmlContent;
+  const plainText = tempDiv.textContent || "";
+  
+  // Split but preserve structure for word mapping
+  // We use the same split logic as Cloze Test initialization
+  const wordsAndSpaces = plainText.split(/(\s+)/);
+  
+  // Track real word index for highlighting and cloze test
+  let wordCounter = 0;
 
-        const processNode = (node: Node): React.ReactNode => {
-            if (node.nodeType === Node.TEXT_NODE) {
-                const text = node.textContent || "";
-                // Split by spaces but keep delimiters
-                const parts = text.split(/(\s+)/);
-                
-                return parts.map((part, i) => {
-                    if (part.trim().length === 0) return part; // Return spaces as is
-                    
-                    const currentIndex = wordCounter++;
-                    const isHighlighted = currentIndex === highlightIndex;
-                    
-                    return (
-                        <span 
-                            key={i}
-                            className={`cursor-pointer transition-colors duration-200 rounded px-0.5 mx-[-2px] 
-                                ${isHighlighted ? 'bg-yellow-300 text-yellow-900 shadow-sm scale-105 inline-block' : 'hover:bg-purple-100 hover:text-purple-700'}
-                            `}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onWordClick(part.replace(/[.,!?;:()"]/g, ""));
-                            }}
-                        >
-                            {part}
-                        </span>
-                    );
-                });
-            } else if (node.nodeType === Node.ELEMENT_NODE) {
-                const element = node as HTMLElement;
-                const tagName = element.tagName.toLowerCase();
-                const children = Array.from(element.childNodes).map((child, i) => <React.Fragment key={i}>{processNode(child)}</React.Fragment>);
-                
-                if (tagName === 'b' || tagName === 'strong') {
-                    return <strong className="font-bold text-indigo-700 bg-indigo-50/50 rounded px-1 box-decoration-clone">{children}</strong>;
-                }
-                if (tagName === 'br') return <br />;
-                if (tagName === 'p') return <p className="mb-4">{children}</p>;
-                
-                return <span>{children}</span>;
+  return (
+    <span>
+        {wordsAndSpaces.map((segment, idx) => {
+            // Check if segment is a word (not whitespace or punctuation-only)
+            const isWord = segment.trim().length > 0 && /[a-zA-Z]/.test(segment);
+            
+            if (!isWord) {
+                return <span key={idx}>{segment}</span>;
             }
-            return null;
-        };
 
-        return Array.from(tempDiv.childNodes).map((node, i) => <React.Fragment key={i}>{processNode(node)}</React.Fragment>);
-    };
+            const currentWordIndex = wordCounter++;
+            const isHidden = isClozeMode && hiddenIndices.includes(currentWordIndex);
+            
+            // Clean word for comparison (remove punctuation)
+            const cleanWord = segment.replace(/[.,!?;:()"]/g, "");
 
-    return <>{createMarkup()}</>;
-});
+            if (isHidden) {
+                const isCorrect = isSubmitted && userInputs[currentWordIndex]?.toLowerCase().trim() === cleanWord.toLowerCase();
+                const isWrong = isSubmitted && !isCorrect;
+
+                return (
+                    <span key={idx} className="inline-block relative mx-0.5">
+                        <input
+                            type="text"
+                            value={userInputs[currentWordIndex] || ''}
+                            onChange={(e) => onInputChange(currentWordIndex, e.target.value)}
+                            disabled={isSubmitted && isCorrect}
+                            className={`w-24 md:w-32 px-2 py-0.5 border-b-2 text-center outline-none bg-transparent transition-all font-sans text-base
+                                ${isSubmitted 
+                                    ? (isCorrect ? 'border-green-500 text-green-700 font-bold bg-green-50/50' : 'border-red-500 text-red-700 bg-red-50/50') 
+                                    : 'border-indigo-300 focus:border-indigo-600 text-indigo-900 bg-indigo-50/30'
+                                }
+                            `}
+                            placeholder={isSubmitted ? "" : "?"}
+                        />
+                         {isWrong && (
+                             <span className="absolute -top-6 left-0 right-0 text-center text-[10px] font-bold text-green-600 bg-green-50 border border-green-200 rounded px-1 py-0.5 animate-bounce-in z-10 whitespace-nowrap">
+                                 {cleanWord}
+                             </span>
+                         )}
+                    </span>
+                );
+            }
+
+            // Normal Word Rendering (Highlighting Logic)
+            const isHighlighted = currentWordIndex === highlightIndex;
+            
+            return (
+                <span
+                    key={idx}
+                    onClick={() => onWordClick(cleanWord)}
+                    className={`
+                        cursor-pointer rounded-md transition-all duration-200 inline-block px-0.5 border border-transparent
+                        ${isHighlighted 
+                            ? 'bg-amber-300 text-amber-900 scale-110 shadow-sm font-bold z-10' 
+                            : 'hover:bg-purple-50 hover:text-purple-700 hover:border-purple-100'
+                        }
+                    `}
+                >
+                    {segment}
+                </span>
+            );
+        })}
+    </span>
+  );
+};
 
 export default App;
