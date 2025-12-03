@@ -21,7 +21,6 @@ import {
   PencilSquareIcon,
   TrophyIcon,
   BoltIcon,
-<<<<<<< HEAD
   MicrophoneIcon,
   Cog6ToothIcon,
   EyeIcon,
@@ -29,9 +28,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   LockClosedIcon
-=======
-  MicrophoneIcon
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
 } from './components/Icons';
 
 // Constants
@@ -100,15 +96,12 @@ const App: React.FC = () => {
   const [storyTheme, setStoryTheme] = useState('');
   const [storyType, setStoryType] = useState<'story' | 'dialogue'>('story');
   
-<<<<<<< HEAD
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
   const [customApiKey, setCustomApiKey] = useState('');
   const [tempApiKey, setTempApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
 
-=======
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
   // Session Timer State
   const [currentTime, setCurrentTime] = useState(new Date());
   const [onlineSeconds, setOnlineSeconds] = useState(0);
@@ -388,7 +381,6 @@ const App: React.FC = () => {
 
     recognition.start();
   };
-<<<<<<< HEAD
 
   const handleSaveApiKey = () => {
       localStorage.setItem(STORAGE_KEY_API, tempApiKey);
@@ -396,8 +388,6 @@ const App: React.FC = () => {
       setShowSettings(false);
       alert("Đã lưu API Key thành công! Ứng dụng sẽ ưu tiên sử dụng Key của bạn.");
   };
-=======
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
 
   const performTranslation = async (text: string) => {
     if (!text.trim()) return;
@@ -501,11 +491,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoadingStory(false);
     }
-<<<<<<< HEAD
   }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen, storyType, energy, customApiKey]);
-=======
-  }, [history, isReadyForStory, lastGenTime, storyTheme, timeSinceLastGen, storyType, energy]);
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
 
   const handleClearHistory = () => {
     if (window.confirm("Xóa toàn bộ lịch sử?")) {
@@ -897,19 +883,11 @@ const App: React.FC = () => {
             </div>
           </div>
           
-<<<<<<< HEAD
           <div className="flex items-center gap-3">
               {/* Energy Bar */}
               <div className="flex items-center gap-2">
                   <BoltIcon className={`w-5 h-5 ${energy < 20 ? 'text-red-500 animate-pulse' : 'text-yellow-500'}`} />
                   <div className="w-16 md:w-32 h-2.5 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
-=======
-          <div className="flex items-center gap-4">
-              {/* Energy Bar */}
-              <div className="flex items-center gap-2">
-                  <BoltIcon className={`w-5 h-5 ${energy < 20 ? 'text-red-500 animate-pulse' : 'text-yellow-500'}`} />
-                  <div className="w-20 md:w-32 h-2.5 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
                       <div 
                         className={`h-full transition-all duration-500 ${energy < 20 ? 'bg-red-500' : 'bg-gradient-to-r from-yellow-400 to-orange-500'}`}
                         style={{ width: `${energy}%` }}
@@ -918,7 +896,6 @@ const App: React.FC = () => {
                   <span className="text-xs font-bold text-gray-600 hidden md:inline">{Math.round(energy)}%</span>
               </div>
 
-<<<<<<< HEAD
               {/* Settings Button */}
               <button 
                 onClick={() => setShowSettings(true)}
@@ -933,10 +910,6 @@ const App: React.FC = () => {
 
               {/* Session Timeline for PC */}
               <div className="hidden md:flex flex-col items-end text-xs text-gray-500 border-l border-gray-100 pl-4 ml-1">
-=======
-              {/* Session Timeline for PC */}
-              <div className="hidden md:flex flex-col items-end text-xs text-gray-500 border-l border-gray-100 pl-4 ml-2">
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
                   <span className="font-medium text-gray-700">
                       {currentTime.toLocaleTimeString('vi-VN')}
                   </span>
@@ -1121,7 +1094,6 @@ const App: React.FC = () => {
 
                         {/* Action Bar */}
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-<<<<<<< HEAD
                             {/* Quick Suggestions with Scroll */}
                             <div className="order-2 md:order-1 flex-1 min-w-0">
                                 <ScrollableRow>
@@ -1135,28 +1107,11 @@ const App: React.FC = () => {
                                         </button>
                                     ))}
                                 </ScrollableRow>
-=======
-                            {/* Quick Suggestions */}
-                            <div className="flex flex-wrap gap-2 order-2 md:order-1">
-                                {QUICK_SUGGESTIONS[direction].slice(0, 3).map((text, i) => (
-                                    <button 
-                                        key={i} 
-                                        onClick={() => handleSuggestionClick(text)}
-                                        className="text-xs bg-gray-50 hover:bg-indigo-50 text-gray-500 hover:text-indigo-600 px-3 py-1.5 rounded-full transition-colors border border-gray-200 hover:border-indigo-200 truncate max-w-[200px]"
-                                    >
-                                        {text}
-                                    </button>
-                                ))}
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
                             </div>
 
                             {/* Translate Button */}
                             <button
-<<<<<<< HEAD
                                 className="order-1 md:order-2 bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-bold text-base hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] w-full md:w-auto min-w-[140px] shrink-0"
-=======
-                                className="order-1 md:order-2 bg-indigo-600 text-white px-8 py-3.5 rounded-xl font-bold text-base hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.98] w-full md:w-auto min-w-[140px]"
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
                                 onClick={handleTranslate}
                                 disabled={isLoadingTranslate || !inputText.trim()}
                             >
@@ -1290,7 +1245,6 @@ const App: React.FC = () => {
                 <div className="flex gap-2 w-full sm:w-auto">
                      <button 
                         onClick={handleStartQuiz}
-<<<<<<< HEAD
                         className={`flex-1 sm:flex-none text-sm flex items-center justify-center gap-2 border px-4 py-2 rounded-xl transition-all font-medium ${
                             !customApiKey 
                             ? 'bg-gray-50 text-gray-400 border-gray-200 cursor-not-allowed opacity-70' 
@@ -1299,11 +1253,6 @@ const App: React.FC = () => {
                         title={!customApiKey ? "Vui lòng nhập API Key để sử dụng" : ""}
                      >
                         {!customApiKey ? <LockClosedIcon className="w-4 h-4" /> : <ClipboardDocumentCheckIcon className="w-4 h-4" />}
-=======
-                        className="flex-1 sm:flex-none text-sm flex items-center justify-center gap-2 text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-4 py-2 rounded-xl transition-all font-medium"
-                     >
-                        <ClipboardDocumentCheckIcon className="w-4 h-4" />
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
                         Kiểm Tra
                     </button>
                     <button 
@@ -1406,7 +1355,6 @@ const App: React.FC = () => {
                                 onChange={(e) => setStoryTheme(e.target.value)}
                             />
                              <button
-<<<<<<< HEAD
                                 className={`px-6 py-2 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all whitespace-nowrap flex items-center gap-2 ${
                                     !customApiKey || isLoadingStory || history.length < 5
                                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'
@@ -1425,18 +1373,10 @@ const App: React.FC = () => {
                                 ) : (
                                     "Tạo mới"
                                 )}
-=======
-                                className="bg-purple-600 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 shadow-md hover:shadow-lg transition-all whitespace-nowrap"
-                                onClick={() => handleGenerateStory(true)}
-                                disabled={isLoadingStory || history.length < 5}
-                            >
-                                {isLoadingStory ? "Đang viết..." : "Tạo mới"}
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
                             </button>
                         </div>
                      </div>
                      
-<<<<<<< HEAD
                      {/* Theme Suggestions with Horizontal Scroll */}
                      <div className="flex items-center gap-2">
                          <span className="text-xs font-bold text-gray-400 uppercase tracking-wide mr-1 shrink-0">Gợi ý:</span>
@@ -1457,23 +1397,6 @@ const App: React.FC = () => {
                                 ))}
                             </ScrollableRow>
                          </div>
-=======
-                     <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
-                         <span className="text-xs font-bold text-gray-400 uppercase tracking-wide mr-1">Gợi ý:</span>
-                         {SUGGESTED_THEMES.map(theme => (
-                             <button
-                                key={theme}
-                                onClick={() => setStoryTheme(theme)}
-                                className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                                    storyTheme === theme 
-                                    ? 'bg-purple-50 border-purple-200 text-purple-700' 
-                                    : 'bg-white border-gray-200 text-gray-600 hover:border-purple-200 hover:text-purple-600'
-                                }`}
-                             >
-                                 {theme}
-                             </button>
-                         ))}
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
                      </div>
                 </div>
             </div>
@@ -1775,7 +1698,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-<<<<<<< HEAD
       {/* Settings Modal (API Key) */}
       {showSettings && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in" onClick={() => setShowSettings(false)}>
@@ -1842,8 +1764,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-=======
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
       {/* Congratulation Popup */}
       {showCongratulation && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
@@ -1870,7 +1790,6 @@ const App: React.FC = () => {
 // --- New Component: Date Accordion ---
 const DateAccordion: React.FC<{ title: string; count: number; children: React.ReactNode; defaultOpen?: boolean }> = ({ title, count, children, defaultOpen = false }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
-<<<<<<< HEAD
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm transition-all duration-300">
@@ -1930,33 +1849,8 @@ const ScrollableRow: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             >
                 <ChevronRightIcon className="w-4 h-4 text-gray-600" />
             </button>
-=======
-
-  return (
-    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm transition-all duration-300">
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-4 bg-gray-50/50 hover:bg-gray-100/80 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-            <h3 className="font-bold text-gray-700 text-base md:text-lg">{title}</h3>
-            <span className="text-xs bg-white border border-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium shadow-sm">
-                {count} mục
-            </span>
->>>>>>> 5362cc10cc5ae01e7acc922623096b85b119bc9d
         </div>
-        <ChevronDownIcon className={`w-5 h-5 text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-      
-      <div 
-        className={`transition-all duration-500 ease-in-out overflow-hidden ${isOpen ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}
-      >
-        <div className="p-4 bg-white border-t border-gray-100">
-            {children}
-        </div>
-      </div>
-    </div>
-  );
+    );
 };
 
 // --- Updated Component: InteractiveStoryText ---
