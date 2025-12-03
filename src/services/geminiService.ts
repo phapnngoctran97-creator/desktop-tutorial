@@ -55,13 +55,21 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       ${promptInstructions}
       3. "partOfSpeech": The grammatical category (e.g., Noun, Verb).
       4. "usageHint": A brief tip, collocation, or very short example of how to use the English word/phrase naturally.
+      5. "tenses": If the word is a VERB, provide an object with "past" (Simple Past), "present" (Simple Present 3rd person/Base), and "future" (Simple Future). If not a verb or not applicable, return empty strings for these fields.
+      6. "emoji": A single relevant emoji or a set of emojis representing the word/meaning to act as an icon/illustration. If abstract, use a symbolic emoji.
       
       Response JSON Schema:
       {
         "english": "string",
         "phonetic": "string",
         "partOfSpeech": "string",
-        "usageHint": "string"
+        "usageHint": "string",
+        "emoji": "string",
+        "tenses": {
+           "past": "string",
+           "present": "string",
+           "future": "string"
+        }
       }
     `;
 
@@ -78,6 +86,15 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
             phonetic: { type: Type.STRING },
             partOfSpeech: { type: Type.STRING },
             usageHint: { type: Type.STRING },
+            emoji: { type: Type.STRING },
+            tenses: {
+              type: Type.OBJECT,
+              properties: {
+                past: { type: Type.STRING },
+                present: { type: Type.STRING },
+                future: { type: Type.STRING },
+              }
+            }
           },
         },
       }
@@ -224,7 +241,7 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
   }
 };
 
-export const lookupWord = async (text: string, context: string): Promise<{ phonetic: string, type: string, meaning: string, example: string }> => {
+export const lookupWord = async (text: string, context: string): Promise<{ phonetic: string, type: string, meaning: string, example: string, emoji?: string }> => {
   try {
     const ai = getAIClient();
     
@@ -242,33 +259,55 @@ export const lookupWord = async (text: string, context: string): Promise<{ phone
           - meaning: The Vietnamese translation.
           - example: A grammatical note or key vocabulary from the sentence.
         `;
+        // NO Emoji for sentences
+         const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                safetySettings: safetySettings,
+                responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    phonetic: { type: Type.STRING },
+                    type: { type: Type.STRING },
+                    meaning: { type: Type.STRING },
+                    example: { type: Type.STRING },
+                },
+                },
+            }
+        });
+        const cleanText = cleanJsonResponse(response.text || "{}");
+        return JSON.parse(cleanText);
+
     } else {
         prompt = `
-          Define the word/phrase "${text}" in Vietnamese based on context: "${context.substring(0, 100)}...".
-          Return JSON: phonetic, type, meaning, example (English).
+          Define the word "${text}" in Vietnamese based on context: "${context.substring(0, 100)}...".
+          Return JSON: phonetic, type, meaning, example (English), and a relevant emoji.
         `;
+        // Include Emoji for single words
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                safetySettings: safetySettings,
+                responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    phonetic: { type: Type.STRING },
+                    type: { type: Type.STRING },
+                    meaning: { type: Type.STRING },
+                    example: { type: Type.STRING },
+                    emoji: { type: Type.STRING },
+                },
+                },
+            }
+        });
+        const cleanText = cleanJsonResponse(response.text || "{}");
+        return JSON.parse(cleanText);
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        safetySettings: safetySettings,
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            phonetic: { type: Type.STRING },
-            type: { type: Type.STRING },
-            meaning: { type: Type.STRING },
-            example: { type: Type.STRING },
-          },
-        },
-      }
-    });
-
-    const cleanText = cleanJsonResponse(response.text || "{}");
-    return JSON.parse(cleanText);
   } catch (error) {
     return { phonetic: "", type: "", meaning: "Lỗi tra cứu", example: "" };
   }
