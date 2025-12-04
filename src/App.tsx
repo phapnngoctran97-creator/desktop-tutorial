@@ -835,8 +835,35 @@ const App: React.FC = () => {
 
     try {
         const questions = await generateQuizFromWords(selectedWords);
-        // Fix potential ID collisions from AI by forcing unique IDs based on index
-        const sanitizedQuestions = questions.map((q, idx) => ({ ...q, id: idx }));
+        
+        // SANITIZE & NORMALIZE QUIZ DATA to fix scoring bugs
+        const sanitizedQuestions = questions.map((q, idx) => {
+            // Ensure correctAnswer perfectly matches one of the options
+            let bestMatch = q.correctAnswer;
+            
+            // 1. Try exact match (case insensitive trim)
+            const exactMatch = q.options.find(opt => opt.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase());
+            if (exactMatch) bestMatch = exactMatch;
+            
+            // 2. Try index match if answer is like "A", "B"
+            else if (/^[A-D]$/i.test(q.correctAnswer.trim())) {
+                const index = q.correctAnswer.trim().toUpperCase().charCodeAt(0) - 65; // A=0, B=1...
+                if (q.options[index]) bestMatch = q.options[index];
+            }
+            
+            // 3. Try substring match (e.g. correct="Apple" in option="A. Apple")
+            else {
+                const subMatch = q.options.find(opt => opt.includes(q.correctAnswer) || q.correctAnswer.includes(opt));
+                if (subMatch) bestMatch = subMatch;
+            }
+
+            return {
+                ...q,
+                id: idx, // Ensure unique ID
+                correctAnswer: bestMatch // Use the normalized correct answer
+            };
+        });
+
         setQuizQuestions(sanitizedQuestions);
         setEnergy(prev => Math.max(0, prev - 5)); // Deduct energy
     } catch (error) {
@@ -1251,6 +1278,7 @@ const App: React.FC = () => {
                                 dateLabel={group.dateLabel} 
                                 items={group.items} 
                                 defaultOpen={idx === 0}
+                                layout="grid"
                                 renderItem={(item: HistoryItem) => (
                                     <div 
                                         onClick={() => handleAudioToggle(`word-${item.id}`, item.english)}
@@ -1399,8 +1427,9 @@ const App: React.FC = () => {
                             dateLabel={group.dateLabel}
                             items={group.items}
                             defaultOpen={idx === 0}
+                            layout="list"
                             renderItem={(story: GeneratedStory) => (
-                                <div key={story.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden animate-fade-in group">
+                                <div key={story.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden animate-fade-in group w-full mb-6 last:mb-0">
                                     {/* Story Header */}
                                     <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-4">
                                         <div>
@@ -1471,7 +1500,7 @@ const App: React.FC = () => {
                                     {/* Story Content */}
                                     <div className="p-6 md:p-8 space-y-8">
                                         {/* English Content */}
-                                        <div className="leading-relaxed text-gray-800 text-lg md:text-xl font-serif">
+                                        <div className="leading-loose text-gray-800 text-lg md:text-xl font-serif tracking-wide">
                                             <InteractiveStoryText 
                                                 content={story.content} 
                                                 highlightedIndex={activeAudioId === story.id ? highlightedWordIndex : -1}
@@ -1508,7 +1537,7 @@ const App: React.FC = () => {
                                              </button>
                                              
                                              {showVietnamese[story.id] && (
-                                                 <div className="mt-4 p-4 bg-gray-50 rounded-xl text-gray-600 italic border border-gray-100 animate-fade-in">
+                                                 <div className="mt-4 p-4 bg-gray-50 rounded-xl text-gray-600 italic border border-gray-100 animate-fade-in leading-relaxed">
                                                      {story.vietnameseContent}
                                                  </div>
                                              )}
@@ -1836,7 +1865,7 @@ const ScrollableRow = ({ children }: { children: React.ReactNode }) => {
     );
 };
 
-const DateAccordion = ({ dateLabel, items, renderItem, defaultOpen }: { dateLabel: string, items: any[], renderItem: any, defaultOpen?: boolean }) => {
+const DateAccordion = ({ dateLabel, items, renderItem, defaultOpen, layout = 'grid' }: { dateLabel: string, items: any[], renderItem: any, defaultOpen?: boolean, layout?: 'grid' | 'list' }) => {
     const [isOpen, setIsOpen] = useState(defaultOpen || false);
 
     return (
@@ -1854,7 +1883,7 @@ const DateAccordion = ({ dateLabel, items, renderItem, defaultOpen }: { dateLabe
             
             <div className={`grid gap-4 transition-all duration-300 ease-in-out ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0 overflow-hidden'}`}>
                 <div className="overflow-hidden">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-2">
+                    <div className={`${layout === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-2' : 'flex flex-col space-y-6 pb-2'}`}>
                         {items.map(renderItem)}
                     </div>
                 </div>

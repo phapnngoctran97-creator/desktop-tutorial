@@ -3,10 +3,14 @@ import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@
 import { TranslationResponse, GeneratedStory, GrammarPoint, WordSuggestion, QuizQuestion } from "../types";
 
 const getAIClient = () => {
-  if (!process.env.API_KEY) {
-    throw new Error("API Key not found in environment variables");
+  // Prioritize Custom API Key from localStorage for user flexibility
+  const customKey = localStorage.getItem('VOCA_CUSTOM_API_KEY');
+  const apiKey = customKey || process.env.API_KEY;
+
+  if (!apiKey) {
+    throw new Error("API Key not found. Please set a custom key in settings or check environment variables.");
   }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: apiKey });
 };
 
 // Common safety settings to prevent blocking of educational content
@@ -108,7 +112,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       english: "Error translating", 
       phonetic: "",
       partOfSpeech: "Unknown", 
-      usageHint: "Please check your network." 
+      usageHint: "Please check your network or API Key." 
     };
   }
 };
@@ -381,6 +385,7 @@ export const generateQuizFromWords = async (words: string[]): Promise<QuizQuesti
       Create 10 multiple-choice questions to test the user's understanding of these words: ${wordListStr}.
       Questions can be: "What does X mean?", "Fill in the blank", or "Find the synonym".
       Provide 4 options (A, B, C, D) and identify the correct one.
+      IMPORTANT: The "correctAnswer" field MUST contain the EXACT string value of one of the options in the "options" array, not just the letter (A/B/C/D).
       
       Return JSON Array of objects.
     `;
