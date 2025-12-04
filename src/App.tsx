@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse, WordSuggestion, QuizQuestion, GrammarPoint } from './types';
 import { translateText, generateStoryFromWords, lookupWord, generateSpeech, getWordSuggestions, generateQuizFromWords } from './services/geminiService';
+import { Mascot } from './components/Mascot';
 import { 
   BookOpenIcon, 
   LanguageIcon, 
@@ -896,6 +897,27 @@ const App: React.FC = () => {
       setUserAnswers({});
   };
 
+  const handleMascotClick = () => {
+    // 1. If currently result exists, speak the result
+    if (translatedResult) {
+        handleAudioToggle('mascot-speak-current', translatedResult.english);
+        return;
+    }
+    
+    // 2. If no current result but history exists, speak latest history
+    if (history.length > 0) {
+        handleAudioToggle(`mascot-speak-${history[0].id}`, history[0].english);
+        return;
+    }
+
+    // 3. Default Greeting
+    const greeting = "Hello, I'm TNP Robot. Let's learn some new words together!";
+    handleAudioToggle('mascot-greeting', greeting);
+  };
+  
+  const mascotLatestWord = translatedResult?.english || history[0]?.english;
+  const isMascotSpeaking = activeAudioId?.startsWith('mascot');
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 pb-20 font-sans">
       {/* Header */}
@@ -904,7 +926,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <BookOpenIcon className="w-7 h-7 text-blue-600" />
             <div>
-                 <h1 className="text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 truncate">VocaStory AI</h1>
+                 <h1 className="text-lg md:text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 truncate">Study English With TNP</h1>
                  {/* Session Timeline for Mobile (Simplified) */}
                  <p className="text-[10px] text-gray-400 md:hidden flex items-center gap-1">
                     <ClockIcon className="w-3 h-3" /> {formatDuration(onlineSeconds)}
@@ -951,6 +973,15 @@ const App: React.FC = () => {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+        
+        {/* Mascot Section - Added here */}
+        {!isQuizMode && (
+          <Mascot 
+            latestWord={mascotLatestWord}
+            isSpeaking={!!isMascotSpeaking && !isPaused}
+            onSpeak={handleMascotClick}
+          />
+        )}
         
         {/* Quiz Mode View */}
         {isQuizMode ? (
