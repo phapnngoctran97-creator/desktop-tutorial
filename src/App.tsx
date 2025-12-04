@@ -898,24 +898,31 @@ const App: React.FC = () => {
   };
 
   const handleMascotClick = () => {
-    // 1. If currently result exists, speak the result
-    if (translatedResult) {
-        handleAudioToggle('mascot-speak-current', translatedResult.english);
-        return;
-    }
-    
-    // 2. If no current result but history exists, speak latest history
-    if (history.length > 0) {
-        handleAudioToggle(`mascot-speak-${history[0].id}`, history[0].english);
-        return;
-    }
+    // Collect words from Today (Start of day 00:00:00)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTimestamp = today.getTime();
 
-    // 3. Default Greeting
-    const greeting = "Hello, I'm TNP Robot. Let's learn some new words together!";
-    handleAudioToggle('mascot-greeting', greeting);
+    const todaysWords = history.filter(item => item.timestamp >= todayTimestamp);
+
+    if (todaysWords.length > 0) {
+        // Dedup words
+        const uniqueWords = Array.from(new Set(todaysWords.map(w => w.english)));
+        
+        // Limit to last 20 to strictly avoid too long speech
+        const speechList = uniqueWords.slice(0, 20).join(", ");
+        
+        const intro = "Here are the words you searched today: ";
+        const textToSpeak = intro + speechList + (uniqueWords.length > 20 ? ", and more." : ".");
+        
+        handleAudioToggle('mascot-daily-review', textToSpeak);
+    } else {
+        // Default Greeting
+        const greeting = "Hello, I'm TNP Robot. Use the translation box to learn new words!";
+        handleAudioToggle('mascot-greeting', greeting);
+    }
   };
   
-  const mascotLatestWord = translatedResult?.english || history[0]?.english;
   const isMascotSpeaking = activeAudioId?.startsWith('mascot');
 
   return (
@@ -973,15 +980,6 @@ const App: React.FC = () => {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
-        
-        {/* Mascot Section - Added here */}
-        {!isQuizMode && (
-          <Mascot 
-            latestWord={mascotLatestWord}
-            isSpeaking={!!isMascotSpeaking && !isPaused}
-            onSpeak={handleMascotClick}
-          />
-        )}
         
         {/* Quiz Mode View */}
         {isQuizMode ? (
@@ -1618,6 +1616,15 @@ const App: React.FC = () => {
         </>
         )}
       </main>
+
+      {/* Mascot Section - Fixed Overlay */}
+      {!isQuizMode && (
+          <Mascot 
+            latestWord={undefined} // Not used anymore as logic is inside
+            isSpeaking={!!isMascotSpeaking && !isPaused}
+            onSpeak={handleMascotClick}
+          />
+      )}
 
       {/* Settings Modal */}
       {showSettings && (

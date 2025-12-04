@@ -20,15 +20,16 @@ export const Mascot: React.FC<MascotProps> = ({ latestWord, isSpeaking, onSpeak 
     return () => clearInterval(blinkInterval);
   }, []);
 
-  // Hide bubble after 5 seconds initially, show again when word changes
+  // Show bubble initially
   useEffect(() => {
     setShowBubble(true);
-    const timer = setTimeout(() => setShowBubble(false), 8000);
+    // Auto hide bubble after 5s if not speaking, but show again on hover (via CSS group)
+    const timer = setTimeout(() => setShowBubble(false), 5000);
     return () => clearTimeout(timer);
-  }, [latestWord]);
+  }, [latestWord, isSpeaking]);
 
   return (
-    <div className="flex justify-center my-6 relative z-10">
+    <div className="fixed bottom-6 right-4 md:bottom-10 md:right-10 z-50 flex flex-col items-end">
       <style>
         {`
           @keyframes float {
@@ -52,22 +53,22 @@ export const Mascot: React.FC<MascotProps> = ({ latestWord, isSpeaking, onSpeak 
       <div 
         onClick={onSpeak}
         className="relative cursor-pointer group animate-float transition-transform active:scale-95"
-        title="Click để nghe từ mới nhất!"
+        title="Click để nghe ôn tập từ vựng hôm nay!"
       >
-        {/* Speech Bubble */}
-        <div className={`absolute -right-24 -top-8 bg-white px-4 py-2 rounded-2xl rounded-bl-none shadow-lg border border-indigo-100 transition-all duration-500 ${showBubble || isSpeaking ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
-          <p className="text-xs font-bold text-indigo-600 whitespace-nowrap">
-            {isSpeaking ? "Đang đọc..." : (latestWord ? "Click để nghe!" : "Xin chào!")}
+        {/* Speech Bubble - Positioned to the LEFT of the robot now */}
+        <div className={`absolute right-[110%] top-0 mr-2 bg-white px-4 py-3 rounded-2xl rounded-tr-none shadow-xl border border-indigo-100 transition-all duration-500 w-48 text-right flex items-center justify-end ${showBubble || isSpeaking ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none group-hover:opacity-100 group-hover:translate-x-0 group-hover:pointer-events-auto'}`}>
+          <p className="text-xs md:text-sm font-bold text-indigo-600 leading-snug">
+            {isSpeaking ? "Đang đọc danh sách từ..." : "Hello, I'm TNP Robot"}
           </p>
         </div>
 
         {/* The 3D Robot Head */}
-        <div className="w-24 h-24 relative">
+        <div className="w-20 h-20 md:w-24 md:h-24 relative">
             {/* Shadow */}
-            <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-16 h-4 bg-black/10 rounded-[50%] blur-sm transition-all duration-300 group-hover:w-12 group-hover:blur-md"></div>
+            <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-14 h-3 bg-black/20 rounded-[50%] blur-sm transition-all duration-300 group-hover:w-10 group-hover:blur-md"></div>
 
             {/* Main Head Shape - 3D Gradient */}
-            <div className="w-full h-full bg-gradient-to-br from-blue-400 via-indigo-500 to-purple-600 rounded-3xl shadow-xl relative overflow-hidden border-t border-white/30 border-l border-white/20">
+            <div className="w-full h-full bg-gradient-to-br from-blue-400 via-indigo-500 to-purple-600 rounded-3xl shadow-2xl relative overflow-hidden border-t border-white/30 border-l border-white/20 ring-2 ring-white/10">
                 
                 {/* Glossy Reflection */}
                 <div className="absolute top-0 right-0 w-16 h-16 bg-white/10 rounded-full blur-xl -translate-y-1/2 translate-x-1/2"></div>
@@ -79,7 +80,7 @@ export const Mascot: React.FC<MascotProps> = ({ latestWord, isSpeaking, onSpeak 
                 </div>
 
                 {/* Face Screen */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-14 bg-gray-900 rounded-xl flex flex-col items-center justify-center gap-2 shadow-inner border border-white/10">
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-14 h-12 md:w-16 md:h-14 bg-gray-900 rounded-xl flex flex-col items-center justify-center gap-2 shadow-inner border border-white/10">
                     
                     {/* Eyes */}
                     <div className="flex gap-3">
