@@ -16,6 +16,11 @@ export interface GrammarPoint {
   memoryTip: string; // Mẹo ghi nhớ
 }
 
+export interface LearningMethods {
+  memorization: string[]; // Các phương pháp ghi nhớ từ vựng (liên tưởng, hình ảnh...)
+  speaking: string[]; // Các cách thực hành giao tiếp (roleplay, questions...)
+}
+
 export interface GeneratedStory {
   id: string;
   content: string; // HTML string with bold tags for vocab (English)
@@ -24,6 +29,7 @@ export interface GeneratedStory {
   vocabularyUsed: string[];
   theme: string;
   grammarPoints?: GrammarPoint[]; // Optional for backward compatibility
+  learningMethods?: LearningMethods; // New field for learning strategies
   generationTimeMs?: number; // Time taken to generate in milliseconds
 }
 

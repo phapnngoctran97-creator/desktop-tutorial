@@ -28,7 +28,8 @@ import {
   EyeSlashIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  LockClosedIcon
+  LockClosedIcon,
+  LightBulbIcon
 } from './components/Icons';
 
 // Constants
@@ -121,6 +122,7 @@ const App: React.FC = () => {
   // New State for Bilingual & Lookup Features
   const [showVietnamese, setShowVietnamese] = useState<Record<string, boolean>>({});
   const [showGrammar, setShowGrammar] = useState<Record<string, boolean>>({});
+  const [showLearningTips, setShowLearningTips] = useState<Record<string, boolean>>({});
   const [selectedWord, setSelectedWord] = useState<WordDefinition | null>(null);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [lookupCache, setLookupCache] = useState<Record<string, WordDefinition>>({});
@@ -478,6 +480,7 @@ const App: React.FC = () => {
         content: result.english,
         vietnameseContent: result.vietnamese,
         grammarPoints: result.grammarPoints,
+        learningMethods: result.learningMethods,
         timestamp: Date.now(),
         vocabularyUsed: wordList,
         theme: (storyType === 'dialogue' ? '💬 Hội thoại - ' : '📖 Truyện ngắn - ') + (storyTheme || 'General'),
@@ -564,6 +567,7 @@ const App: React.FC = () => {
 
   const toggleVietnamese = (storyId: string) => setShowVietnamese(prev => ({ ...prev, [storyId]: !prev[storyId] }));
   const toggleGrammar = (storyId: string) => setShowGrammar(prev => ({ ...prev, [storyId]: !prev[storyId] }));
+  const toggleLearningTips = (storyId: string) => setShowLearningTips(prev => ({ ...prev, [storyId]: !prev[storyId] }));
 
   // --- CLOZE TEST FUNCTIONS ---
   const handleStartClozeTest = (storyId: string, content: string) => {
@@ -1573,11 +1577,12 @@ const App: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* Grammar Section */}
+                                    {/* Grammar & Learning Methods Section */}
                                     <div className="bg-teal-50/50 border-t border-teal-100">
+                                         {/* Grammar Toggle */}
                                          <button 
                                             onClick={() => toggleGrammar(story.id)}
-                                            className="w-full px-6 py-3 flex items-center justify-between text-teal-700 font-semibold hover:bg-teal-50 transition-colors"
+                                            className="w-full px-6 py-3 flex items-center justify-between text-teal-700 font-semibold hover:bg-teal-50 transition-colors border-b border-teal-100/50"
                                          >
                                              <div className="flex items-center gap-2">
                                                  <AcademicCapIcon className="w-5 h-5" />
@@ -1605,6 +1610,52 @@ const App: React.FC = () => {
                                                     <p className="text-center text-gray-400 italic text-sm">Không có dữ liệu ngữ pháp cho bài này.</p>
                                                 )}
                                              </div>
+                                         )}
+
+                                         {/* Learning Methods Toggle (New) */}
+                                         {story.learningMethods && (
+                                            <>
+                                                <button 
+                                                    onClick={() => toggleLearningTips(story.id)}
+                                                    className="w-full px-6 py-3 flex items-center justify-between text-amber-700 font-semibold hover:bg-amber-50 transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <LightBulbIcon className="w-5 h-5" />
+                                                        Phương Pháp Học & Giao Tiếp
+                                                    </div>
+                                                    <ChevronDownIcon className={`w-4 h-4 transition-transform ${showLearningTips[story.id] ? 'rotate-180' : ''}`} />
+                                                </button>
+                                                
+                                                {showLearningTips[story.id] && (
+                                                    <div className="px-6 pb-6 pt-2 animate-fade-in">
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            {/* Memorization Tips */}
+                                                            <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 shadow-sm">
+                                                                <h4 className="font-bold text-amber-800 mb-3 flex items-center gap-2 border-b border-amber-200 pb-2">
+                                                                    🧠 Mẹo Ghi Nhớ
+                                                                </h4>
+                                                                <ul className="list-disc list-inside space-y-2 text-sm text-gray-700">
+                                                                    {story.learningMethods.memorization.map((tip, i) => (
+                                                                        <li key={i}>{tip}</li>
+                                                                    ))}
+                                                                </ul>
+                                                            </div>
+
+                                                            {/* Speaking Practice */}
+                                                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 shadow-sm">
+                                                                <h4 className="font-bold text-blue-800 mb-3 flex items-center gap-2 border-b border-blue-200 pb-2">
+                                                                    🗣️ Thực Hành Giao Tiếp
+                                                                </h4>
+                                                                <ul className="list-disc list-inside space-y-2 text-sm text-gray-700">
+                                                                    {story.learningMethods.speaking.map((tip, i) => (
+                                                                        <li key={i}>{tip}</li>
+                                                                    ))}
+                                                                </ul>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </>
                                          )}
                                     </div>
                                 </div>

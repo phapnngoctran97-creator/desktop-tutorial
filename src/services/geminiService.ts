@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import { TranslationResponse, GeneratedStory, GrammarPoint, WordSuggestion, QuizQuestion } from "../types";
+import { TranslationResponse, GeneratedStory, GrammarPoint, WordSuggestion, QuizQuestion, LearningMethods } from "../types";
 
 const getAIClient = () => {
   // Prioritize Custom API Key from localStorage for user flexibility
@@ -161,7 +161,7 @@ export const getWordSuggestions = async (text: string, direction: 'vi_en' | 'en_
   }
 };
 
-export const generateStoryFromWords = async (words: string[], theme: string = '', type: 'story' | 'dialogue' = 'story'): Promise<{ english: string, vietnamese: string, grammarPoints: GrammarPoint[] }> => {
+export const generateStoryFromWords = async (words: string[], theme: string = '', type: 'story' | 'dialogue' = 'story'): Promise<{ english: string, vietnamese: string, grammarPoints: GrammarPoint[], learningMethods?: LearningMethods }> => {
   const ai = getAIClient();
   const wordListStr = words.join(', ');
   
@@ -180,8 +180,11 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
       1. Wrap vocabulary words in <b> tags.
       2. Use mixed tenses (Present, Past, Perfect).
       3. Analyze 2 grammar points.
+      4. Provide 'learningMethods' in VIETNAMESE language:
+         - memorization: List 2 specific tips to remember these vocab words (e.g., imagery, association).
+         - speaking: List 2 specific ways to practice speaking this story (e.g., roleplay character X, answer question Y).
       
-      Return JSON with english, vietnamese, and grammarPoints.
+      Return JSON with english, vietnamese, grammarPoints, and learningMethods.
     `;
 
     const response = await ai.models.generateContent({
@@ -205,6 +208,13 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
                   exampleInStory: { type: Type.STRING },
                   memoryTip: { type: Type.STRING },
                 }
+              }
+            },
+            learningMethods: {
+              type: Type.OBJECT,
+              properties: {
+                memorization: { type: Type.ARRAY, items: { type: Type.STRING } },
+                speaking: { type: Type.ARRAY, items: { type: Type.STRING } }
               }
             }
           },
