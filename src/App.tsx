@@ -386,8 +386,15 @@ const App: React.FC = () => {
   };
 
   const handleSaveApiKey = () => {
-      localStorage.setItem(STORAGE_KEY_API, tempApiKey);
-      setCustomApiKey(tempApiKey);
+      const cleanedKey = tempApiKey.trim();
+      if (!cleanedKey) {
+          alert("Vui lòng nhập API Key hợp lệ.");
+          return;
+      }
+      
+      localStorage.setItem(STORAGE_KEY_API, cleanedKey);
+      setCustomApiKey(cleanedKey);
+      setTempApiKey(cleanedKey);
       setShowSettings(false);
       alert("Đã lưu API Key thành công! Ứng dụng sẽ ưu tiên sử dụng Key của bạn cho mọi tính năng.");
   };
@@ -415,7 +422,7 @@ const App: React.FC = () => {
       
       setTranslatedResult({ ...result, sourceEnglish: englishText });
 
-      if (englishText && englishText !== "Error translating") {
+      if (englishText && englishText !== "Error translating" && !result.english.startsWith("Error")) {
           const newItem: HistoryItem = {
             id: Date.now().toString(),
             vietnamese: vietnameseText,
