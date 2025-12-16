@@ -1,14 +1,13 @@
-
 import { GoogleGenAI, Type, Modality, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { TranslationResponse, GeneratedStory, GrammarPoint, WordSuggestion, QuizQuestion, LearningMethods } from "../types";
 
 const getAIClient = () => {
-  // Prioritize Custom API Key from localStorage for user flexibility
-  const customKey = localStorage.getItem('VOCA_CUSTOM_API_KEY');
-  const apiKey = customKey || process.env.API_KEY;
+  // Strictly require API Key from Dashboard (Settings)
+  // The user requested to use ONLY the dashboard key and no other sources (like .env or process.env)
+  const apiKey = localStorage.getItem('VOCA_CUSTOM_API_KEY');
 
   if (!apiKey) {
-    throw new Error("API Key not found. Please set a custom key in settings or check environment variables.");
+    throw new Error("API Key not found. Please enter your Google Gemini API Key in the Settings menu.");
   }
   return new GoogleGenAI({ apiKey: apiKey });
 };
@@ -112,7 +111,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       english: "Error translating", 
       phonetic: "",
       partOfSpeech: "Unknown", 
-      usageHint: "Please check your network or API Key." 
+      usageHint: "Please check your network or API Key in Settings." 
     };
   }
 };
