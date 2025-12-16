@@ -389,7 +389,7 @@ const App: React.FC = () => {
       localStorage.setItem(STORAGE_KEY_API, tempApiKey);
       setCustomApiKey(tempApiKey);
       setShowSettings(false);
-      alert("Đã lưu API Key thành công! Ứng dụng sẽ ưu tiên sử dụng Key của bạn.");
+      alert("Đã lưu API Key thành công! Ứng dụng sẽ ưu tiên sử dụng Key của bạn cho mọi tính năng.");
   };
 
   const performTranslation = async (text: string) => {
@@ -428,7 +428,7 @@ const App: React.FC = () => {
           setHistory(prev => [newItem, ...prev]);
       }
     } catch (error) {
-      alert("Lỗi dịch thuật. Vui lòng kiểm tra mạng hoặc API Key.");
+      alert("Lỗi dịch thuật. Vui lòng kiểm tra mạng hoặc API Key trong Cài Đặt.");
     } finally {
       setIsLoadingTranslate(false);
     }
@@ -490,6 +490,11 @@ const App: React.FC = () => {
       setStories(prev => [newStory, ...prev]);
       setLastGenTime(Date.now());
       
+      // Auto expand learning tips for the new story to encourage usage
+      if (result.learningMethods) {
+          setShowLearningTips(prev => ({ ...prev, [newStory.id]: true }));
+      }
+
     } catch (error) {
       alert("Không thể tạo câu chuyện. Hệ thống đang bận, vui lòng thử lại sau.");
     } finally {
@@ -1686,8 +1691,11 @@ const App: React.FC = () => {
                         <Cog6ToothIcon className="w-6 h-6 text-gray-600" />
                         Cài Đặt Hệ Thống
                     </h3>
+                    <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mb-6 text-sm text-yellow-800">
+                         <strong>Lưu ý quan trọng:</strong> API Key của bạn sẽ được lưu an toàn trong trình duyệt (localStorage) và chỉ được sử dụng để thực hiện các yêu cầu AI.
+                    </div>
                     <p className="text-sm text-gray-500 mb-6">
-                        Key mặc định chỉ hỗ trợ dịch thuật cơ bản. Để mở khóa tính năng <b>Tạo Truyện</b> và <b>Kiểm Tra</b>, vui lòng nhập API Key của bạn.
+                        Để mở khóa tính năng <b>Tạo Truyện</b> và <b>Kiểm Tra</b>, vui lòng nhập Google Gemini API Key của bạn.
                     </p>
 
                     <div className="space-y-4">
@@ -1843,9 +1851,6 @@ const InteractiveStoryText = ({
     // We assume the content is mostly plain text with occasional <b> tags.
     // We strip <b> tags for the "words" array but keep track of indices.
     
-    // For Karaoke: We need a mapping from word index to render index.
-    // For Cloze: We replace specific words with inputs.
-
     // Step 1: Strip HTML for basic word splitting
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = content;
@@ -1865,11 +1870,13 @@ const InteractiveStoryText = ({
             {tokens.map((token, i) => {
                 const isWord = token.trim().length > 0 && /[a-zA-Z0-9]/.test(token);
                 
+                // Only increment counter for valid words
+                const currentWordIndex = isWord ? wordCounter++ : -1;
+                
                 if (!isWord) {
                     return <span key={i}>{token}</span>;
                 }
 
-                const currentWordIndex = wordCounter++;
                 const isHidden = isClozeMode && hiddenIndices.includes(currentWordIndex);
                 const isHighlighted = currentWordIndex === highlightedIndex;
 

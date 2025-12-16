@@ -3,7 +3,7 @@ import { TranslationResponse, GeneratedStory, GrammarPoint, WordSuggestion, Quiz
 
 const getAIClient = () => {
   // Strictly require API Key from Dashboard (Settings)
-  // The user requested to use ONLY the dashboard key and no other sources (like .env or process.env)
+  // We explicitly DO NOT check process.env to ensure only the user-provided key is used.
   const apiKey = localStorage.getItem('VOCA_CUSTOM_API_KEY');
 
   if (!apiKey) {
@@ -179,9 +179,9 @@ export const generateStoryFromWords = async (words: string[], theme: string = ''
       1. Wrap vocabulary words in <b> tags.
       2. Use mixed tenses (Present, Past, Perfect).
       3. Analyze 2 grammar points.
-      4. Provide 'learningMethods' in VIETNAMESE language:
-         - memorization: List 2 specific tips to remember these vocab words (e.g., imagery, association).
-         - speaking: List 2 specific ways to practice speaking this story (e.g., roleplay character X, answer question Y).
+      4. Provide 'learningMethods' in VIETNAMESE language to help the user learn these specific words and this story:
+         - memorization: List 2 specific mnemonic or imagery tips to remember the vocabulary.
+         - speaking: List 2 specific roleplay ideas or questions to practice speaking based on this story context.
       
       Return JSON with english, vietnamese, grammarPoints, and learningMethods.
     `;
