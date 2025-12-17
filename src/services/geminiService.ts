@@ -24,32 +24,34 @@ const safetySettings = [
 const cleanJsonResponse = (text: string): string => {
   if (!text) return "{}";
   
-  // 1. Basic markdown removal
-  let clean = text.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+  // Remove markdown code blocks if present
+  let clean = text.replace(/```json/gi, '').replace(/```/g, '').trim();
   
-  // 2. Extract JSON Object if surrounded by text
+  // Attempt to find the outermost JSON object or array
   const firstBrace = clean.indexOf('{');
   const lastBrace = clean.lastIndexOf('}');
-  
-  if (firstBrace !== -1 && lastBrace !== -1) {
-      // Check if there is an array that starts BEFORE the object (e.g. for quiz/suggestions)
-      const firstBracket = clean.indexOf('[');
-      const lastBracket = clean.lastIndexOf(']');
-      
-      if (firstBracket !== -1 && lastBracket !== -1 && firstBracket < firstBrace) {
-          // It's likely an array
-          clean = clean.substring(firstBracket, lastBracket + 1);
-      } else {
-          // It's likely an object
-          clean = clean.substring(firstBrace, lastBrace + 1);
-      }
-  } else {
-       // Only Array check if no Object braces found
-      const firstBracket = clean.indexOf('[');
-      const lastBracket = clean.lastIndexOf(']');
-      if (firstBracket !== -1 && lastBracket !== -1) {
-           clean = clean.substring(firstBracket, lastBracket + 1);
-      }
+  const firstBracket = clean.indexOf('[');
+  const lastBracket = clean.lastIndexOf(']');
+
+  // Determine if it looks like an Object or an Array
+  // We prioritize whichever comes first and has a matching pair
+  let isObject = false;
+  let isArray = false;
+
+  if (firstBrace !== -1 && lastBrace !== -1) isObject = true;
+  if (firstBracket !== -1 && lastBracket !== -1) isArray = true;
+
+  if (isObject && isArray) {
+    // If both exist, take the one that starts earlier
+    if (firstBracket < firstBrace) {
+       clean = clean.substring(firstBracket, lastBracket + 1);
+    } else {
+       clean = clean.substring(firstBrace, lastBrace + 1);
+    }
+  } else if (isObject) {
+    clean = clean.substring(firstBrace, lastBrace + 1);
+  } else if (isArray) {
+    clean = clean.substring(firstBracket, lastBracket + 1);
   }
 
   return clean;
@@ -130,21 +132,34 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
       }
     });
 
-    const cleanText = cleanJsonResponse(response.text || "");
+    if (!response || !response.text) {
+        throw new Error("Empty response from AI (Content Blocked?)");
+    }
+
+    const cleanText = cleanJsonResponse(response.text);
     return JSON.parse(cleanText) as TranslationResponse;
   } catch (error: any) {
     console.error("Gemini Translation Error:", error);
     
-    // Return a structured error object that the UI can handle gracefully
-    // If the API key is wrong, error.message usually contains "API key not valid" or 400
-    const msg = error?.message || "Unknown error";
-    const isApiKeyError = msg.includes("API key") || msg.includes("400") || msg.includes("403");
+    // Extract precise error message
+    let msg = error?.message || String(error);
+    
+    // Friendly error mapping for user
+    if (msg.includes("400") || msg.includes("API key")) {
+        msg = "Invalid API Key. Please check your settings.";
+    } else if (msg.includes("429") || msg.includes("quota")) {
+        msg = "Quota Exceeded. Please try again later.";
+    } else if (msg.includes("fetch failed") || msg.includes("Network")) {
+        msg = "Network Error. Please check internet connection.";
+    } else if (msg.includes("503") || msg.includes("Overloaded")) {
+        msg = "AI Server Busy. Please try again.";
+    }
 
     return { 
-      english: "Error: " + (isApiKeyError ? "Invalid API Key" : "Connection Failed"), 
+      english: `Error: ${msg}`, 
       phonetic: "",
       partOfSpeech: "System", 
-      usageHint: isApiKeyError ? "Please check your API Key in Settings." : "Please try again later."
+      usageHint: "Check the error message above."
     };
   }
 };
