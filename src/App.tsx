@@ -422,7 +422,7 @@ const App: React.FC = () => {
       
       setTranslatedResult({ ...result, sourceEnglish: englishText });
 
-      if (englishText && englishText !== "Error translating" && !result.english.startsWith("Error")) {
+      if (englishText && !result.english.startsWith("Error")) {
           const newItem: HistoryItem = {
             id: Date.now().toString(),
             vietnamese: vietnameseText,
@@ -435,7 +435,8 @@ const App: React.FC = () => {
           setHistory(prev => [newItem, ...prev]);
       }
     } catch (error) {
-      alert("Lỗi dịch thuật. Vui lòng kiểm tra mạng hoặc API Key trong Cài Đặt.");
+      // alert("Lỗi dịch thuật..."); // Removed generic alert in favor of inline error
+      console.error(error);
     } finally {
       setIsLoadingTranslate(false);
     }
@@ -668,6 +669,11 @@ const App: React.FC = () => {
   };
 
   const handleAudioToggle = async (id: string, text: string, forceGemini: boolean = false, isDialogue: boolean = false) => {
+    // Safety check: if text is error, do not play
+    if (text.startsWith("Error:")) {
+        return;
+    }
+    
     if (activeAudioId === id) {
         if (forceGemini && lastAudioVoiceRef.current !== selectedVoice) {
              stopAllAudio();
@@ -1212,7 +1218,7 @@ const App: React.FC = () => {
 
                 {/* Translation Result Card */}
                 {translatedResult && (
-                    <div className="mt-8 p-6 md:p-8 bg-indigo-50 rounded-2xl border border-indigo-100 animate-fade-in relative group transition-all">
+                    <div className={`mt-8 p-6 md:p-8 rounded-2xl border animate-fade-in relative group transition-all ${translatedResult.english.startsWith('Error:') ? 'bg-red-50 border-red-200' : 'bg-indigo-50 border-indigo-100'}`}>
                         {/* Emoji Visual Icon (Improved Position) */}
                         {translatedResult.emoji && (
                             <div className="absolute top-2 right-2 md:top-6 md:right-6 text-5xl md:text-7xl opacity-90 drop-shadow-md select-none pointer-events-none animate-bounce-in">
@@ -1223,24 +1229,26 @@ const App: React.FC = () => {
                         <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-4">
                             <div className="flex-1">
                                 <div className="flex items-baseline flex-wrap gap-3">
-                                    <h3 className="text-3xl md:text-4xl font-bold text-gray-800 tracking-tight">{translatedResult.english}</h3>
+                                    <h3 className={`text-3xl md:text-4xl font-bold tracking-tight ${translatedResult.english.startsWith('Error:') ? 'text-red-600 text-xl' : 'text-gray-800'}`}>{translatedResult.english}</h3>
                                     {translatedResult.phonetic && (
                                         <span className="text-indigo-500 font-mono text-lg bg-indigo-100 px-2 py-0.5 rounded-lg">{translatedResult.phonetic}</span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-3 mt-2 text-sm">
-                                    <span className="bg-white text-indigo-700 font-bold px-3 py-1 rounded-full border border-indigo-100 shadow-sm uppercase tracking-wide text-xs">{translatedResult.partOfSpeech}</span>
-                                    <span className="text-gray-500 flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-gray-100">
-                                        💡 {translatedResult.usageHint}
-                                        <button 
-                                            onClick={() => handleAudioToggle('usage-hint', translatedResult.usageHint)}
-                                            className="ml-2 text-indigo-400 hover:text-indigo-600 transition-colors"
-                                            title="Nghe gợi ý"
-                                        >
-                                            <SpeakerWaveIcon className="w-4 h-4" />
-                                        </button>
-                                    </span>
-                                </div>
+                                {!translatedResult.english.startsWith('Error:') && (
+                                    <div className="flex items-center gap-3 mt-2 text-sm">
+                                        <span className="bg-white text-indigo-700 font-bold px-3 py-1 rounded-full border border-indigo-100 shadow-sm uppercase tracking-wide text-xs">{translatedResult.partOfSpeech}</span>
+                                        <span className="text-gray-500 flex items-center gap-1 bg-white px-2 py-1 rounded-lg border border-gray-100">
+                                            💡 {translatedResult.usageHint}
+                                            <button 
+                                                onClick={() => handleAudioToggle('usage-hint', translatedResult.usageHint)}
+                                                className="ml-2 text-indigo-400 hover:text-indigo-600 transition-colors"
+                                                title="Nghe gợi ý"
+                                            >
+                                                <SpeakerWaveIcon className="w-4 h-4" />
+                                            </button>
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -1267,20 +1275,22 @@ const App: React.FC = () => {
                             </div>
                         )}
 
-                        <div className="mt-6 flex flex-wrap items-center gap-4">
-                            <button 
-                                onClick={() => handleAudioToggle('translate', translatedResult.sourceEnglish || translatedResult.english)}
-                                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-medium transition-all shadow-sm active:scale-95"
-                            >
-                                {activeAudioId === 'translate' && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
-                                <span className="hidden sm:inline">Nghe (EN)</span>
-                            </button>
-                            <SpeedSelector speed={playbackSpeed} onChange={setPlaybackSpeed} />
-                        </div>
+                        {!translatedResult.english.startsWith('Error:') && (
+                            <div className="mt-6 flex flex-wrap items-center gap-4">
+                                <button 
+                                    onClick={() => handleAudioToggle('translate', translatedResult.sourceEnglish || translatedResult.english)}
+                                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-medium transition-all shadow-sm active:scale-95"
+                                >
+                                    {activeAudioId === 'translate' && !isPaused ? <PauseIcon className="w-5 h-5" /> : <SpeakerWaveIcon className="w-5 h-5" />}
+                                    <span className="hidden sm:inline">Nghe (EN)</span>
+                                </button>
+                                <SpeedSelector speed={playbackSpeed} onChange={setPlaybackSpeed} />
+                            </div>
+                        )}
                     </div>
                 )}
             </section>
-
+            
             {/* Vocabulary History Section */}
             <section className="bg-white rounded-2xl shadow-lg p-5 md:p-8 border border-gray-100">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6">
@@ -1359,7 +1369,7 @@ const App: React.FC = () => {
                     </div>
                 )}
             </section>
-
+            
             {/* Story Generator Section */}
             <section className="bg-gradient-to-br from-indigo-900 to-purple-900 rounded-2xl shadow-xl p-6 md:p-8 text-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl pointer-events-none"></div>
