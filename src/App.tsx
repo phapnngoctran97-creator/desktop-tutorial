@@ -5,7 +5,7 @@ import { translateText } from './services/geminiService';
 import { Mascot } from './components/Mascot';
 import { Sidebar } from './components/Sidebar';
 import { 
-  BookOpenIcon, ClockIcon, SparklesIcon, ArrowsRightLeftIcon, ChevronRightIcon, Cog6ToothIcon, TrophyIcon, LockClosedIcon, LightBulbIcon
+  BookOpenIcon, ClockIcon, SparklesIcon, ArrowsRightLeftIcon, ChevronRightIcon, Cog6ToothIcon, TrophyIcon, LockClosedIcon, LightBulbIcon, BoltIcon
 } from './components/Icons';
 
 const App: React.FC = () => {
@@ -17,9 +17,9 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isLoadingTranslate, setIsLoadingTranslate] = useState(false);
   const [energy, setEnergy] = useState(100);
-  const [isKeyConfigured, setIsKeyConfigured] = useState<boolean | null>(null);
+  const [isKeyConfigured, setIsKeyConfigured] = useState<boolean>(false);
 
-  // Kiểm tra xem đã có API Key chưa khi khởi chạy
+  // Kiểm tra trạng thái API Key khi khởi chạy nhưng không chặn UI
   useEffect(() => {
     const checkKey = async () => {
       // @ts-ignore
@@ -33,7 +33,6 @@ const App: React.FC = () => {
     try {
       // @ts-ignore
       await window.aistudio.openSelectKey();
-      // Giả định việc chọn key thành công để tránh race condition
       setIsKeyConfigured(true);
     } catch (err) {
       console.error("Lỗi khi mở trình chọn Key:", err);
@@ -42,6 +41,13 @@ const App: React.FC = () => {
 
   const handleTranslate = async () => {
     if (!inputText.trim()) return;
+    
+    // Nếu chưa có key, yêu cầu người dùng chọn trước
+    if (!isKeyConfigured) {
+      handleConnectKey();
+      return;
+    }
+
     setIsLoadingTranslate(true);
     try {
       const res = await translateText(inputText, direction);
@@ -64,92 +70,70 @@ const App: React.FC = () => {
     }
   };
 
-  // Màn hình Setup API Key
-  if (isKeyConfigured === false) {
-    return (
-      <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6 font-['Inter']">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 shadow-2xl relative overflow-hidden text-center">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"></div>
-          <div className="w-20 h-20 bg-blue-600/20 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-xl shadow-blue-500/10">
-            <LockClosedIcon className="w-10 h-10 text-blue-500" />
-          </div>
-          <h1 className="text-3xl font-black text-white mb-4">Kết nối Gemini API</h1>
-          <p className="text-slate-400 mb-10 leading-relaxed">
-            Chào mừng bạn! Để bắt đầu phiên dịch và học tập không giới hạn, vui lòng kết nối API Key từ dự án Google Cloud của bạn.
-          </p>
-          
-          <button 
-            onClick={handleConnectKey}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-600/20 mb-6 flex items-center justify-center gap-2 group"
-          >
-            <SparklesIcon className="w-5 h-5 group-hover:rotate-12 transition-transform" />
-            Chọn API Key của bạn
-          </button>
-
-          <a 
-            href="https://ai.google.dev/gemini-api/docs/billing" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="text-slate-500 hover:text-blue-400 text-sm font-medium transition-colors flex items-center justify-center gap-2"
-          >
-            <LightBulbIcon className="w-4 h-4" />
-            Tìm hiểu về Billing & API Key
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  // Loading state trong khi check key
-  if (isKeyConfigured === null) {
-    return (
-      <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
   const renderToolContent = () => {
     switch (activeTool) {
       case ToolType.DASHBOARD:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-700">
-            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-xl hover:shadow-blue-500/5 transition-all">
-               <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-6">
-                 <TrophyIcon className="w-6 h-6 text-blue-600" />
-               </div>
-               <h3 className="text-2xl font-black text-slate-800 mb-3">Sẵn sàng học tập?</h3>
-               <p className="text-slate-500 leading-relaxed mb-8">Hãy bắt đầu hành trình chinh phục tiếng Anh bằng cách dịch các từ vựng mới và lưu chúng vào kho lưu trữ cá nhân.</p>
-               <button 
-                onClick={() => setActiveTool(ToolType.TRANSLATE)}
-                className="w-full bg-slate-900 text-white px-6 py-4 rounded-2xl font-bold hover:bg-blue-600 transition-all shadow-lg flex items-center justify-center gap-2 group"
-               >
-                 Bắt đầu dịch ngay
-                 <ChevronRightIcon className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-               </button>
-            </div>
-            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
-               <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                 <ClockIcon className="w-6 h-6 text-blue-500" /> Hoạt động gần đây
-               </h3>
-               {history.length > 0 ? (
-                 <ul className="space-y-4">
-                    {history.slice(0, 4).map(item => (
-                      <li key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
-                        <div className="flex flex-col">
-                          <span className="font-bold text-slate-800">{item.english}</span>
-                          <span className="text-slate-400 text-xs">{item.vietnamese}</span>
-                        </div>
-                        <span className="text-[10px] bg-white border px-2 py-1 rounded-lg text-blue-500 font-black uppercase tracking-tighter">{item.partOfSpeech}</span>
-                      </li>
-                    ))}
-                 </ul>
-               ) : (
-                 <div className="flex flex-col items-center justify-center py-10 opacity-30 grayscale">
-                    <BookOpenIcon className="w-16 h-16 mb-4" />
-                    <p className="text-slate-500 italic">Chưa có dữ liệu</p>
+          <div className="space-y-8 animate-in fade-in duration-700">
+            {/* Banner yêu cầu API nếu chưa có */}
+            {!isKeyConfigured && (
+              <div className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem] flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center">
+                    <LightBulbIcon className="w-6 h-6 text-amber-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-amber-900">Chưa kết nối Gemini API</h4>
+                    <p className="text-amber-700 text-sm">Vui lòng kết nối API key để sử dụng đầy đủ các tính năng thông minh.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleConnectKey}
+                  className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-amber-600/20 whitespace-nowrap"
+                >
+                  Kết nối ngay
+                </button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-xl hover:shadow-blue-500/5 transition-all">
+                 <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-6">
+                   <TrophyIcon className="w-6 h-6 text-blue-600" />
                  </div>
-               )}
+                 <h3 className="text-2xl font-black text-slate-800 mb-3">Sẵn sàng học tập?</h3>
+                 <p className="text-slate-500 leading-relaxed mb-8">Hãy bắt đầu hành trình chinh phục tiếng Anh bằng cách dịch các từ vựng mới và lưu chúng vào kho lưu trữ cá nhân.</p>
+                 <button 
+                  onClick={() => setActiveTool(ToolType.TRANSLATE)}
+                  className="w-full bg-slate-900 text-white px-6 py-4 rounded-2xl font-bold hover:bg-blue-600 transition-all shadow-lg flex items-center justify-center gap-2 group"
+                 >
+                   Bắt đầu dịch ngay
+                   <ChevronRightIcon className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                 </button>
+              </div>
+              <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
+                 <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+                   <ClockIcon className="w-6 h-6 text-blue-500" /> Hoạt động gần đây
+                 </h3>
+                 {history.length > 0 ? (
+                   <ul className="space-y-4">
+                      {history.slice(0, 4).map(item => (
+                        <li key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-800">{item.english}</span>
+                            <span className="text-slate-400 text-xs">{item.vietnamese}</span>
+                          </div>
+                          <span className="text-[10px] bg-white border px-2 py-1 rounded-lg text-blue-500 font-black uppercase tracking-tighter">{item.partOfSpeech}</span>
+                        </li>
+                      ))}
+                   </ul>
+                 ) : (
+                   <div className="flex flex-col items-center justify-center py-10 opacity-30 grayscale">
+                      <BookOpenIcon className="w-16 h-16 mb-4" />
+                      <p className="text-slate-500 italic">Chưa có dữ liệu</p>
+                   </div>
+                 )}
+              </div>
             </div>
           </div>
         );
@@ -179,7 +163,7 @@ const App: React.FC = () => {
                   >
                     {isLoadingTranslate ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    ) : 'Dịch ngay'}
+                    ) : (isKeyConfigured ? 'Dịch ngay' : 'Kết nối API & Dịch')}
                   </button>
                </div>
             </div>
@@ -274,13 +258,13 @@ const App: React.FC = () => {
                   <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse"></div>
                   <span className="font-black text-slate-700 text-sm tracking-widest">{energy}% ENERGY</span>
                </div>
-               <div 
+               <button 
                  onClick={handleConnectKey}
-                 className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white cursor-pointer hover:bg-blue-600 transition-colors shadow-lg shadow-slate-900/10"
-                 title="Cấu hình API Key"
+                 className={`flex items-center gap-2 px-5 py-3 rounded-2xl font-bold transition-all shadow-lg ${isKeyConfigured ? 'bg-slate-900 text-white' : 'bg-blue-600 text-white animate-pulse shadow-blue-600/20'}`}
                >
-                  <Cog6ToothIcon className="w-6 h-6" />
-               </div>
+                  <BoltIcon className={`w-5 h-5 ${isKeyConfigured ? 'text-blue-400' : 'text-white'}`} />
+                  {isKeyConfigured ? 'Connected' : 'Connect Key'}
+               </button>
             </div>
           </header>
           <div className="min-h-[calc(100vh-250px)]">
