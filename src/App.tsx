@@ -47,62 +47,108 @@ const App: React.FC = () => {
     switch (activeTool) {
       case ToolType.DASHBOARD:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-               <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                 <TrophyIcon className="w-6 h-6 text-yellow-500" /> Tiến độ học tập
-               </h3>
-               <p className="text-gray-500">Chào mừng bạn trở lại! Hãy bắt đầu bằng việc dịch một từ mới hoặc xem lại kho từ vựng.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-700">
+            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 hover:shadow-xl hover:shadow-blue-500/5 transition-all">
+               <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-6">
+                 <TrophyIcon className="w-6 h-6 text-blue-600" />
+               </div>
+               <h3 className="text-2xl font-black text-slate-800 mb-3">Sẵn sàng học tập?</h3>
+               <p className="text-slate-500 leading-relaxed mb-8">Hãy bắt đầu hành trình chinh phục tiếng Anh bằng cách dịch các từ vựng mới và lưu chúng vào kho lưu trữ cá nhân.</p>
                <button 
                 onClick={() => setActiveTool(ToolType.TRANSLATE)}
-                className="mt-4 bg-blue-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-sm"
-               >Bắt đầu ngay</button>
+                className="w-full bg-slate-900 text-white px-6 py-4 rounded-2xl font-bold hover:bg-blue-600 transition-all shadow-lg flex items-center justify-center gap-2 group"
+               >
+                 Bắt đầu dịch ngay
+                 <ChevronRightIcon className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+               </button>
             </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-               <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                 <ClockIcon className="w-6 h-6 text-blue-500" /> Lịch sử gần đây
+            <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
+               <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+                 <ClockIcon className="w-6 h-6 text-blue-500" /> Hoạt động gần đây
                </h3>
                {history.length > 0 ? (
-                 <ul className="space-y-3">
-                    {history.slice(0, 3).map(item => (
-                      <li key={item.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                        <span className="font-bold">{item.english}</span>
-                        <span className="text-gray-500 text-sm">{item.vietnamese}</span>
+                 <ul className="space-y-4">
+                    {history.slice(0, 4).map(item => (
+                      <li key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100/50">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-slate-800">{item.english}</span>
+                          <span className="text-slate-400 text-xs">{item.vietnamese}</span>
+                        </div>
+                        <span className="text-[10px] bg-white border px-2 py-1 rounded-lg text-blue-500 font-black uppercase tracking-tighter">{item.partOfSpeech}</span>
                       </li>
                     ))}
                  </ul>
                ) : (
-                 <p className="text-gray-400 italic">Chưa có lịch sử học tập nào.</p>
+                 <div className="flex flex-col items-center justify-center py-10 opacity-30 grayscale">
+                    <BookOpenIcon className="w-16 h-16 mb-4" />
+                    <p className="text-slate-500 italic">Chưa có dữ liệu</p>
+                 </div>
                )}
             </div>
           </div>
         );
       case ToolType.TRANSLATE:
         return (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+          <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl shadow-blue-900/5 border border-slate-100 relative overflow-hidden">
+               {/* Background Glow */}
+               <div className="absolute -top-24 -right-24 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl"></div>
+               
                <textarea 
-                  className="w-full p-4 text-xl border-none focus:ring-0 outline-none min-h-[150px] resize-none"
-                  placeholder={direction === 'en_vi' ? "Nhập tiếng Anh..." : "Nhập tiếng Việt..."}
+                  className="w-full p-4 text-2xl font-medium border-none focus:ring-0 outline-none min-h-[180px] resize-none text-slate-800 placeholder-slate-300"
+                  placeholder={direction === 'en_vi' ? "Type something in English..." : "Nhập câu tiếng Việt..."}
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                />
-               <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-0">
-                  <button onClick={() => setDirection(d => d === 'en_vi' ? 'vi_en' : 'en_vi')} className="flex items-center gap-2 text-gray-500 font-bold hover:text-blue-600">
-                    <ArrowsRightLeftIcon className="w-5 h-5" /> {direction === 'en_vi' ? 'EN ➔ VI' : 'VI ➔ EN'}
+               
+               <div className="flex flex-col sm:flex-row justify-between items-center mt-6 pt-6 border-t border-slate-50 gap-4">
+                  <button 
+                    onClick={() => setDirection(d => d === 'en_vi' ? 'vi_en' : 'en_vi')} 
+                    className="flex items-center gap-3 bg-slate-50 px-5 py-3 rounded-2xl text-slate-600 font-bold hover:bg-slate-100 transition-colors border border-slate-100"
+                  >
+                    <ArrowsRightLeftIcon className="w-5 h-5 text-blue-500" />
+                    {direction === 'en_vi' ? 'English to Vietnamese' : 'Vietnamese to English'}
                   </button>
-                  <button onClick={handleTranslate} disabled={isLoadingTranslate} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-md flex items-center gap-2">
-                    {isLoadingTranslate ? 'Đang dịch...' : 'Dịch ngay'}
+                  
+                  <button 
+                    onClick={handleTranslate} 
+                    disabled={isLoadingTranslate} 
+                    className="w-full sm:w-auto bg-blue-600 text-white px-10 py-4 rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 disabled:opacity-50 transition-all active:scale-95"
+                  >
+                    {isLoadingTranslate ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        Đang dịch...
+                      </>
+                    ) : 'Dịch ngay'}
                   </button>
                </div>
             </div>
+
             {translatedResult && (
-              <div className="bg-blue-50 p-8 rounded-2xl border border-blue-100 animate-fade-in shadow-sm">
-                <h3 className="text-4xl font-bold text-gray-800 mb-2">{translatedResult.english} {translatedResult.emoji}</h3>
-                <p className="text-blue-600 font-mono text-xl mb-4">{translatedResult.phonetic}</p>
-                <div className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm inline-block">
-                  <span className="font-bold text-blue-700 uppercase text-xs mr-2">{translatedResult.partOfSpeech}</span>
-                  <span className="text-gray-600">💡 {translatedResult.usageHint}</span>
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-10 rounded-[2.5rem] text-white shadow-2xl shadow-blue-900/20 relative overflow-hidden group">
+                {/* Decorative Pattern */}
+                <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-700">
+                   <SparklesIcon className="w-32 h-32" />
+                </div>
+
+                <div className="relative z-10">
+                  <div className="flex items-center gap-4 mb-4">
+                    <h3 className="text-5xl font-black tracking-tight">{translatedResult.english}</h3>
+                    <span className="text-4xl">{translatedResult.emoji}</span>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-4 mb-8">
+                    <p className="text-blue-100 font-mono text-2xl bg-white/10 px-4 py-1 rounded-xl backdrop-blur-sm">{translatedResult.phonetic}</p>
+                    <span className="bg-yellow-400 text-slate-900 px-3 py-1 rounded-lg text-xs font-black uppercase">{translatedResult.partOfSpeech}</span>
+                  </div>
+
+                  <div className="bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/10 max-w-2xl">
+                    <p className="text-blue-50 text-lg leading-relaxed italic">
+                      <span className="font-black text-white not-italic mr-2">Tip:</span>
+                      "{translatedResult.usageHint}"
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
@@ -110,22 +156,31 @@ const App: React.FC = () => {
         );
       case ToolType.HISTORY:
         return (
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-               <BookOpenIcon className="w-7 h-7 text-blue-500" /> Kho từ vựng của bạn
-            </h2>
+          <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 animate-in fade-in duration-700">
+            <div className="flex justify-between items-center mb-10">
+              <h2 className="text-3xl font-black text-slate-800 flex items-center gap-3">
+                 <BookOpenIcon className="w-9 h-9 text-blue-600" /> Thư viện từ vựng
+              </h2>
+              <div className="text-slate-400 font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl">
+                {history.length} từ đã lưu
+              </div>
+            </div>
+
             {history.length === 0 ? (
-              <div className="text-center py-10 text-gray-400">Bạn chưa có từ vựng nào trong danh sách.</div>
+              <div className="text-center py-20 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200">
+                <p className="text-slate-400 text-lg font-medium">Danh sách của bạn đang trống.</p>
+              </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {history.map(item => (
-                  <div key={item.id} className="p-4 border border-gray-100 rounded-xl hover:shadow-md transition-shadow bg-gray-50/30">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-bold text-lg text-blue-600">{item.english}</span>
-                      <span className="text-[10px] bg-white border px-2 py-0.5 rounded text-gray-400 uppercase font-bold">{item.partOfSpeech}</span>
+                  <div key={item.id} className="group p-6 bg-white border border-slate-100 rounded-[2rem] hover:border-blue-200 hover:shadow-xl hover:shadow-blue-500/5 transition-all">
+                    <div className="flex justify-between items-start mb-4">
+                      <span className="font-black text-2xl text-slate-800 group-hover:text-blue-600 transition-colors">{item.english}</span>
+                      <span className="text-[10px] bg-slate-100 px-2 py-1 rounded-lg text-slate-500 uppercase font-bold">{item.partOfSpeech}</span>
                     </div>
-                    <p className="text-gray-700 font-medium">{item.vietnamese}</p>
-                    {item.usageHint && <p className="text-xs text-gray-400 mt-2 italic">"{item.usageHint}"</p>}
+                    <p className="text-slate-600 font-bold mb-4">{item.vietnamese}</p>
+                    <div className="h-px bg-slate-50 w-full mb-4"></div>
+                    <p className="text-xs text-slate-400 italic leading-relaxed line-clamp-2">"{item.usageHint}"</p>
                   </div>
                 ))}
               </div>
@@ -134,36 +189,61 @@ const App: React.FC = () => {
         );
       default:
         return (
-          <div className="bg-white p-20 rounded-2xl text-center border border-dashed border-gray-200">
-             <div className="text-4xl mb-4">🚀</div>
-             <p className="text-gray-400 font-medium text-lg">Tính năng này sẽ sớm ra mắt trong bản cập nhật tới!</p>
-             <button onClick={() => setActiveTool(ToolType.DASHBOARD)} className="mt-6 text-blue-600 font-bold hover:underline">Quay về trang chính</button>
+          <div className="bg-white p-20 rounded-[3rem] text-center border-2 border-dashed border-slate-200 animate-in zoom-in duration-500">
+             <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-8 text-5xl">🚀</div>
+             <h3 className="text-2xl font-black text-slate-800 mb-4">Tính năng sắp ra mắt!</h3>
+             <p className="text-slate-400 font-medium max-w-sm mx-auto mb-10">Chúng tôi đang hoàn thiện công nghệ AI để mang đến cho bạn trải nghiệm học tập tốt nhất.</p>
+             <button onClick={() => setActiveTool(ToolType.DASHBOARD)} className="text-blue-600 font-black hover:bg-blue-50 px-8 py-3 rounded-2xl transition-all">Quay lại Dashboard</button>
           </div>
         );
     }
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden font-['Inter']">
       <Sidebar 
         activeTool={activeTool} 
         onSelect={setActiveTool} 
         isCollapsed={isSidebarCollapsed} 
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
-      <main className="flex-1 overflow-y-auto p-6 md:p-10">
-        <header className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-extrabold text-gray-800 tracking-tight">VocaStory AI <span className="text-blue-600">English</span></h1>
-          <div className="flex items-center gap-4">
-             <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-100 flex items-center gap-2">
-                <BoltIcon className="w-5 h-5 text-yellow-500" />
-                <span className="font-bold text-gray-700">{energy}%</span>
-             </div>
+      <main className="flex-1 overflow-y-auto custom-scrollbar relative">
+        {/* Background Decoration */}
+        <div className="absolute top-0 left-0 right-0 h-64 bg-gradient-to-b from-blue-50/50 to-transparent pointer-events-none"></div>
+        
+        <div className="max-w-6xl mx-auto p-8 md:p-12 relative z-10">
+          <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
+            <div>
+              <h1 className="text-4xl font-black text-slate-900 tracking-tighter">VocaStory <span className="text-blue-600">AI</span></h1>
+              <p className="text-slate-400 font-bold text-sm mt-1">Nền tảng học tiếng Anh cá nhân hóa</p>
+            </div>
+            
+            <div className="flex items-center gap-4">
+               <div className="bg-white px-6 py-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse"></div>
+                  <span className="font-black text-slate-700 text-sm tracking-widest">{energy}% ENERGY</span>
+               </div>
+               <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white cursor-pointer hover:bg-blue-600 transition-colors shadow-lg shadow-slate-900/10">
+                  <Cog6ToothIcon className="w-6 h-6" />
+               </div>
+            </div>
+          </header>
+          
+          <div className="min-h-[calc(100vh-250px)]">
+            {renderToolContent()}
           </div>
-        </header>
-        {renderToolContent()}
+
+          <footer className="mt-20 py-10 border-t border-slate-200/60 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-400 text-sm font-bold">
+            <p>&copy; 2024 VocaStory AI. Build your English daily.</p>
+            <div className="flex gap-8">
+              <a href="#" className="hover:text-blue-600 transition-colors">Privacy</a>
+              <a href="#" className="hover:text-blue-600 transition-colors">Terms</a>
+              <a href="#" className="hover:text-blue-600 transition-colors">Feedback</a>
+            </div>
+          </footer>
+        </div>
       </main>
-      <Mascot isSpeaking={!!activeAudioId} onSpeak={() => alert("Xin chào! Hãy cùng khám phá thế giới từ vựng tiếng Anh nhé.")} />
+      <Mascot isSpeaking={!!activeAudioId} onSpeak={() => alert("Keep going! Consistency is key to learning English.")} />
     </div>
   );
 };
