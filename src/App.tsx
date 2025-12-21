@@ -1,11 +1,11 @@
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { HistoryItem, GeneratedStory, WordDefinition, TranslationResponse, WordSuggestion, QuizQuestion, GrammarPoint, ToolType } from './types';
-import { translateText, generateStoryFromWords, lookupWord, generateSpeech, getWordSuggestions, generateQuizFromWords } from './services/geminiService';
+import React, { useState, useEffect } from 'react';
+import { HistoryItem, TranslationResponse, ToolType } from './types';
+import { translateText } from './services/geminiService';
 import { Mascot } from './components/Mascot';
 import { Sidebar } from './components/Sidebar';
 import { 
-  BookOpenIcon, LanguageIcon, ClockIcon, SparklesIcon, TrashIcon, SpeakerWaveIcon, PauseIcon, XMarkIcon, AcademicCapIcon, ArrowsRightLeftIcon, ClipboardDocumentCheckIcon, CheckCircleIcon, XCircleIcon, ChevronDownIcon, PencilSquareIcon, TrophyIcon, BoltIcon, MicrophoneIcon, Cog6ToothIcon, EyeIcon, EyeSlashIcon, ChevronLeftIcon, ChevronRightIcon, LockClosedIcon, LightBulbIcon
+  BookOpenIcon, ClockIcon, SparklesIcon, ArrowsRightLeftIcon, ChevronRightIcon, Cog6ToothIcon, TrophyIcon, LockClosedIcon, LightBulbIcon
 } from './components/Icons';
 
 const App: React.FC = () => {
@@ -17,7 +17,28 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isLoadingTranslate, setIsLoadingTranslate] = useState(false);
   const [energy, setEnergy] = useState(100);
-  const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
+  const [isKeyConfigured, setIsKeyConfigured] = useState<boolean | null>(null);
+
+  // Kiểm tra xem đã có API Key chưa khi khởi chạy
+  useEffect(() => {
+    const checkKey = async () => {
+      // @ts-ignore
+      const hasKey = await window.aistudio.hasSelectedApiKey();
+      setIsKeyConfigured(hasKey);
+    };
+    checkKey();
+  }, []);
+
+  const handleConnectKey = async () => {
+    try {
+      // @ts-ignore
+      await window.aistudio.openSelectKey();
+      // Giả định việc chọn key thành công để tránh race condition
+      setIsKeyConfigured(true);
+    } catch (err) {
+      console.error("Lỗi khi mở trình chọn Key:", err);
+    }
+  };
 
   const handleTranslate = async () => {
     if (!inputText.trim()) return;
@@ -42,6 +63,51 @@ const App: React.FC = () => {
       setIsLoadingTranslate(false); 
     }
   };
+
+  // Màn hình Setup API Key
+  if (isKeyConfigured === false) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-6 font-['Inter']">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-[2.5rem] p-10 shadow-2xl relative overflow-hidden text-center">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500"></div>
+          <div className="w-20 h-20 bg-blue-600/20 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-xl shadow-blue-500/10">
+            <LockClosedIcon className="w-10 h-10 text-blue-500" />
+          </div>
+          <h1 className="text-3xl font-black text-white mb-4">Kết nối Gemini API</h1>
+          <p className="text-slate-400 mb-10 leading-relaxed">
+            Chào mừng bạn! Để bắt đầu phiên dịch và học tập không giới hạn, vui lòng kết nối API Key từ dự án Google Cloud của bạn.
+          </p>
+          
+          <button 
+            onClick={handleConnectKey}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-blue-600/20 mb-6 flex items-center justify-center gap-2 group"
+          >
+            <SparklesIcon className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+            Chọn API Key của bạn
+          </button>
+
+          <a 
+            href="https://ai.google.dev/gemini-api/docs/billing" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-slate-500 hover:text-blue-400 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+          >
+            <LightBulbIcon className="w-4 h-4" />
+            Tìm hiểu về Billing & API Key
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Loading state trong khi check key
+  if (isKeyConfigured === null) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   const renderToolContent = () => {
     switch (activeTool) {
@@ -91,16 +157,13 @@ const App: React.FC = () => {
         return (
           <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl shadow-blue-900/5 border border-slate-100 relative overflow-hidden">
-               {/* Background Glow */}
                <div className="absolute -top-24 -right-24 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl"></div>
-               
                <textarea 
                   className="w-full p-4 text-2xl font-medium border-none focus:ring-0 outline-none min-h-[180px] resize-none text-slate-800 placeholder-slate-300"
                   placeholder={direction === 'en_vi' ? "Type something in English..." : "Nhập câu tiếng Việt..."}
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                />
-               
                <div className="flex flex-col sm:flex-row justify-between items-center mt-6 pt-6 border-t border-slate-50 gap-4">
                   <button 
                     onClick={() => setDirection(d => d === 'en_vi' ? 'vi_en' : 'en_vi')} 
@@ -109,17 +172,13 @@ const App: React.FC = () => {
                     <ArrowsRightLeftIcon className="w-5 h-5 text-blue-500" />
                     {direction === 'en_vi' ? 'English to Vietnamese' : 'Vietnamese to English'}
                   </button>
-                  
                   <button 
                     onClick={handleTranslate} 
                     disabled={isLoadingTranslate} 
                     className="w-full sm:w-auto bg-blue-600 text-white px-10 py-4 rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 disabled:opacity-50 transition-all active:scale-95"
                   >
                     {isLoadingTranslate ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        Đang dịch...
-                      </>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                     ) : 'Dịch ngay'}
                   </button>
                </div>
@@ -127,22 +186,18 @@ const App: React.FC = () => {
 
             {translatedResult && (
               <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-10 rounded-[2.5rem] text-white shadow-2xl shadow-blue-900/20 relative overflow-hidden group">
-                {/* Decorative Pattern */}
                 <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform duration-700">
                    <SparklesIcon className="w-32 h-32" />
                 </div>
-
                 <div className="relative z-10">
                   <div className="flex items-center gap-4 mb-4">
                     <h3 className="text-5xl font-black tracking-tight">{translatedResult.english}</h3>
                     <span className="text-4xl">{translatedResult.emoji}</span>
                   </div>
-                  
                   <div className="flex flex-wrap items-center gap-4 mb-8">
                     <p className="text-blue-100 font-mono text-2xl bg-white/10 px-4 py-1 rounded-xl backdrop-blur-sm">{translatedResult.phonetic}</p>
                     <span className="bg-yellow-400 text-slate-900 px-3 py-1 rounded-lg text-xs font-black uppercase">{translatedResult.partOfSpeech}</span>
                   </div>
-
                   <div className="bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/10 max-w-2xl">
                     <p className="text-blue-50 text-lg leading-relaxed italic">
                       <span className="font-black text-white not-italic mr-2">Tip:</span>
@@ -165,7 +220,6 @@ const App: React.FC = () => {
                 {history.length} từ đã lưu
               </div>
             </div>
-
             {history.length === 0 ? (
               <div className="text-center py-20 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200">
                 <p className="text-slate-400 text-lg font-medium">Danh sách của bạn đang trống.</p>
@@ -208,31 +262,30 @@ const App: React.FC = () => {
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
       <main className="flex-1 overflow-y-auto custom-scrollbar relative">
-        {/* Background Decoration */}
         <div className="absolute top-0 left-0 right-0 h-64 bg-gradient-to-b from-blue-50/50 to-transparent pointer-events-none"></div>
-        
         <div className="max-w-6xl mx-auto p-8 md:p-12 relative z-10">
           <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
             <div>
               <h1 className="text-4xl font-black text-slate-900 tracking-tighter">VocaStory <span className="text-blue-600">AI</span></h1>
               <p className="text-slate-400 font-bold text-sm mt-1">Nền tảng học tiếng Anh cá nhân hóa</p>
             </div>
-            
             <div className="flex items-center gap-4">
                <div className="bg-white px-6 py-3 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-3">
                   <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse"></div>
                   <span className="font-black text-slate-700 text-sm tracking-widest">{energy}% ENERGY</span>
                </div>
-               <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white cursor-pointer hover:bg-blue-600 transition-colors shadow-lg shadow-slate-900/10">
+               <div 
+                 onClick={handleConnectKey}
+                 className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white cursor-pointer hover:bg-blue-600 transition-colors shadow-lg shadow-slate-900/10"
+                 title="Cấu hình API Key"
+               >
                   <Cog6ToothIcon className="w-6 h-6" />
                </div>
             </div>
           </header>
-          
           <div className="min-h-[calc(100vh-250px)]">
             {renderToolContent()}
           </div>
-
           <footer className="mt-20 py-10 border-t border-slate-200/60 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-400 text-sm font-bold">
             <p>&copy; 2024 VocaStory AI. Build your English daily.</p>
             <div className="flex gap-8">
@@ -243,7 +296,7 @@ const App: React.FC = () => {
           </footer>
         </div>
       </main>
-      <Mascot isSpeaking={!!activeAudioId} onSpeak={() => alert("Keep going! Consistency is key to learning English.")} />
+      <Mascot isSpeaking={false} onSpeak={() => alert("Học cùng TNP nhé!")} />
     </div>
   );
 };
