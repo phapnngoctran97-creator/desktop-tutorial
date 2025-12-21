@@ -1,4 +1,13 @@
 
+export enum ToolType {
+  DASHBOARD = 'DASHBOARD',
+  TRANSLATE = 'TRANSLATE',
+  HISTORY = 'HISTORY',
+  STORIES = 'STORIES',
+  QUIZ = 'QUIZ',
+  SETTINGS = 'SETTINGS'
+}
+
 export interface HistoryItem {
   id: string;
   vietnamese: string;
@@ -10,27 +19,27 @@ export interface HistoryItem {
 }
 
 export interface GrammarPoint {
-  structure: string; // Tên cấu trúc (e.g., Past Perfect)
-  explanation: string; // Giải thích ngắn gọn
-  exampleInStory: string; // Câu ví dụ trích từ truyện
-  memoryTip: string; // Mẹo ghi nhớ
+  structure: string;
+  explanation: string;
+  exampleInStory: string;
+  memoryTip: string;
 }
 
 export interface LearningMethods {
-  memorization: string[]; // Các phương pháp ghi nhớ từ vựng (liên tưởng, hình ảnh...)
-  speaking: string[]; // Các cách thực hành giao tiếp (roleplay, questions...)
+  memorization: string[];
+  speaking: string[];
 }
 
 export interface GeneratedStory {
   id: string;
-  content: string; // HTML string with bold tags for vocab (English)
-  vietnameseContent: string; // Full Vietnamese translation
+  content: string;
+  vietnameseContent: string;
   timestamp: number;
   vocabularyUsed: string[];
   theme: string;
-  grammarPoints?: GrammarPoint[]; // Optional for backward compatibility
-  learningMethods?: LearningMethods; // New field for learning strategies
-  generationTimeMs?: number; // Time taken to generate in milliseconds
+  grammarPoints?: GrammarPoint[];
+  learningMethods?: LearningMethods;
+  generationTimeMs?: number;
 }
 
 export interface WordDefinition {
@@ -39,33 +48,33 @@ export interface WordDefinition {
   type: string;
   meaning: string;
   example: string;
-  emoji?: string; // Icon minh hoạ
+  emoji?: string;
 }
 
 export interface TranslationResponse {
   english: string;
-  phonetic: string; // IPA transcription
+  phonetic: string;
   partOfSpeech: string;
   usageHint: string;
-  emoji?: string; // Visual illustration using Emoji
-  sourceEnglish?: string; // Always holds the English text content
+  emoji?: string;
+  sourceEnglish?: string;
   tenses?: {
-    past: string;    // e.g., went / walked
-    present: string; // e.g., goes / walks
-    future: string;  // e.g., will go / will walk
+    past: string;
+    present: string;
+    future: string;
   };
 }
 
 export interface WordSuggestion {
   word: string;
-  type: string; // noun, verb, adj...
-  meaning: string; // short meaning
+  type: string;
+  meaning: string;
 }
 
 export interface QuizQuestion {
   id: number;
   question: string;
-  options: string[]; // [A, B, C, D]
+  options: string[];
   correctAnswer: string;
   explanation: string;
 }
