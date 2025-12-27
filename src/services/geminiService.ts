@@ -1,14 +1,8 @@
 
-import { GoogleGenAI, Type, Modality } from "@google/genai";
-import { TranslationResponse, GrammarPoint, WordSuggestion, QuizQuestion, LearningMethods } from "../types";
+import { GoogleGenAI, Type } from "@google/genai";
+import { TranslationResponse, GeneratedStory, QuizQuestion, HistoryItem } from "../types";
 
-/**
- * Khởi tạo client AI. 
- * API Key được lấy từ process.env.API_KEY (được platform tự động inject sau khi chọn key).
- */
-const getAI = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
-};
+const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' = 'vi_en'): Promise<TranslationResponse> => {
   try {
@@ -16,13 +10,13 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
     const isEnToVi = direction === 'en_vi';
 
     const prompt = `
-      Task: Translate "${text}" ${isEnToVi ? 'from English to Vietnamese' : 'from Vietnamese to English'}.
-      Return a JSON object with:
-      1. "english": The English version of the word.
-      2. "phonetic": Standard IPA phonetic.
-      3. "partOfSpeech": Noun, Verb, etc.
-      4. "usageHint": A practical example sentence or tip.
-      5. "emoji": A single representative emoji.
+      Translate "${text}" ${isEnToVi ? 'from English to Vietnamese' : 'from Vietnamese to English'}.
+      Return JSON:
+      1. "english": English version.
+      2. "phonetic": IPA pronunciation.
+      3. "partOfSpeech": Noun/Verb/Adj/Adv.
+      4. "usageHint": A practical example sentence.
+      5. "emoji": One matching emoji.
     `;
 
     const response = await ai.models.generateContent({
@@ -40,42 +34,86 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
             emoji: { type: Type.STRING }
           },
           required: ["english", "phonetic", "partOfSpeech", "usageHint", "emoji"]
-        },
+        }
       }
     });
 
     return JSON.parse(response.text.trim());
   } catch (error: any) {
-    console.error("Gemini Translation Error:", error);
-    
-    // Nếu lỗi do key (404/entity not found), yêu cầu người dùng chọn lại key
-    if (error.message?.includes("not found") || error.message?.includes("API_KEY")) {
-      if (window.aistudio && window.aistudio.openSelectKey) {
-        window.aistudio.openSelectKey();
-      }
-    }
-
-    return { 
-      english: "Error", 
-      phonetic: "N/A", 
-      partOfSpeech: "N/A", 
-      usageHint: "Không thể kết nối AI. Vui lòng kiểm tra API Key.",
-      emoji: "❌"
-    };
+    console.error("Gemini Error:", error);
+    return { english: "Error", phonetic: "N/A", partOfSpeech: "Error", usageHint: "Check your API key.", emoji: "⚠️" };
   }
 };
 
-export const generateStoryFromWords = async (words: string[]): Promise<any> => {
+export const generateStoryFromWords = async (words: string[]): Promise<GeneratedStory> => {
   try {
     const ai = getAI();
-    const prompt = `Write a short story using these words: ${words.join(', ')}. Return JSON with fields: english, vietnamese.`;
+    const prompt = `Write a short bilingual story (max 100 words) using these English words: ${words.join(', ')}.
+    Return JSON:
+    1. "content": The English version of the story.
+    2. "vietnameseContent": The Vietnamese translation.
+    3. "vocabularyUsed": The list of words provided.
+    4. "theme": A one-word theme for the story.
+    `;
+
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
-      config: { responseMimeType: "application/json" }
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            content: { type: Type.STRING },
+            vietnameseContent: { type: Type.STRING },
+            vocabularyUsed: { type: Type.ARRAY, items: { type: Type.STRING } },
+            theme: { type: Type.STRING }
+          }
+        }
+      }
     });
+
+    const data = JSON.parse(response.text.trim());
+    return {
+      ...data,
+      id: Date.now().toString(),
+      timestamp: Date.now()
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+export const generateQuizFromHistory = async (history: HistoryItem[]): Promise<QuizQuestion[]> => {
+  try {
+    const ai = getAI();
+    const wordsJson = JSON.stringify(history.map(h => ({ en: h.english, vi: h.vietnamese })));
+    const prompt = `Create 3 multiple-choice questions to test the meaning of these words: ${wordsJson}. 
+    Return JSON array of objects with fields: id, question, options (array of 4), correctAnswer, explanation.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.INTEGER },
+              question: { type: Type.STRING },
+              options: { type: Type.ARRAY, items: { type: Type.STRING } },
+              correctAnswer: { type: Type.STRING },
+              explanation: { type: Type.STRING }
+            }
+          }
+        }
+      }
+    });
+
     return JSON.parse(response.text.trim());
-  } catch {
-    return { english: "Error", vietnamese: "Lỗi" };
+  } catch (error) {
+    throw error;
   }
 };
