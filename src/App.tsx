@@ -20,13 +20,19 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   
-  // States cho tính năng mở rộng
   const [stories, setStories] = useState<GeneratedStory[]>([]);
   const [currentQuiz, setCurrentQuiz] = useState<QuizQuestion[]>([]);
   const [quizScore, setQuizScore] = useState<{correct: number, total: number} | null>(null);
 
   useEffect(() => {
     const checkKey = async () => {
+      // 1. Kiểm tra xem có Key trong biến môi trường (Cloudflare/Production) không
+      if (process.env.API_KEY && process.env.API_KEY !== '') {
+        setIsConnected(true);
+        return;
+      }
+
+      // 2. Nếu không có, kiểm tra trong môi trường AI Studio
       try {
         // @ts-ignore
         if (window.aistudio?.hasSelectedApiKey) {
@@ -39,7 +45,7 @@ const App: React.FC = () => {
       }
     };
     checkKey();
-    const interval = setInterval(checkKey, 3000);
+    const interval = setInterval(checkKey, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -50,13 +56,18 @@ const App: React.FC = () => {
       await window.aistudio.openSelectKey();
       setIsConnected(true);
     } else {
-      alert("Vui lòng sử dụng trong môi trường Google AI Studio để cấu hình API Key.");
+      alert("Ở môi trường Cloudflare, bạn cần cấu hình API_KEY trong phần 'Settings > Variables and Secrets' của Cloudflare Dashboard.");
     }
   };
 
   const handleTranslate = async () => {
     if (!inputText.trim()) return;
-    if (!isConnected) { await handleConnectAPI(); return; }
+    
+    // Nếu không có key, yêu cầu kết nối
+    if (!isConnected && (!process.env.API_KEY || process.env.API_KEY === '')) { 
+      await handleConnectAPI(); 
+      return; 
+    }
 
     setIsLoading(true);
     try {
@@ -69,7 +80,7 @@ const App: React.FC = () => {
       setTranslatedResults(results);
       const newItems: HistoryItem[] = results.map((res, idx) => ({
         id: `${Date.now()}-${idx}`,
-        vietnamese: direction === 'vi_en' ? res.source : res.english,
+        vietnamese: direction === 'vi_en' ? res.source : (res.english === 'Error' ? 'Lỗi dịch' : res.usageHint), // Fallback đơn giản
         english: direction === 'en_vi' ? res.source : res.english,
         partOfSpeech: res.partOfSpeech,
         usageHint: res.usageHint,
@@ -86,8 +97,6 @@ const App: React.FC = () => {
 
   const handleCreateStory = async () => {
     if (history.length < 3) { alert("Bạn cần tra cứu ít nhất 3 từ để tạo truyện!"); return; }
-    if (!isConnected) { await handleConnectAPI(); return; }
-    
     setIsLoading(true);
     try {
       const words = history.slice(0, 5).map(h => h.english);
@@ -96,6 +105,7 @@ const App: React.FC = () => {
       setActiveTool(ToolType.STORIES);
     } catch (err) {
       console.error(err);
+      alert("Không thể tạo truyện. Vui lòng kiểm tra API Key.");
     } finally {
       setIsLoading(false);
     }
@@ -111,6 +121,7 @@ const App: React.FC = () => {
       setActiveTool(ToolType.QUIZ);
     } catch (err) {
       console.error(err);
+      alert("Không thể tạo bài kiểm tra.");
     } finally {
       setIsLoading(false);
     }
@@ -119,7 +130,6 @@ const App: React.FC = () => {
   const renderDashboard = () => (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Main Search Card */}
         <div className="lg:col-span-2 bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
@@ -148,25 +158,27 @@ const App: React.FC = () => {
           </button>
         </div>
 
-        {/* API Status Card */}
         <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col justify-between">
           <div className="text-center">
             <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 ${isConnected ? 'bg-emerald-50 text-emerald-500' : 'bg-amber-50 text-amber-500 animate-pulse'}`}>
               <BoltIcon className="w-8 h-8" />
             </div>
             <h4 className="font-black text-slate-800">{isConnected ? "AI Sẵn sàng" : "Chưa kết nối AI"}</h4>
-            <p className="text-slate-400 text-xs mt-1">Cần API Key để sử dụng các tính năng thông minh.</p>
+            <p className="text-slate-400 text-xs mt-1">
+              {isConnected 
+                ? "Key đã được thiết lập thành công." 
+                : "Vui lòng cấu hình API_KEY trên Cloudflare để sử dụng."}
+            </p>
           </div>
           <button 
             onClick={handleConnectAPI}
             className={`w-full py-3 mt-6 rounded-xl font-black text-sm transition-all ${isConnected ? 'bg-slate-100 text-slate-600' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'}`}
           >
-            {isConnected ? "THAY ĐỔI KEY" : "KẾT NỐI API"}
+            {isConnected ? "KIỂM TRA LẠI" : "KẾT NỐI API"}
           </button>
         </div>
       </div>
 
-      {/* Results */}
       {translatedResults.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {translatedResults.map((res, i) => (
@@ -183,7 +195,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* History Area */}
       <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-black text-slate-800 flex items-center gap-2">
@@ -216,7 +227,7 @@ const App: React.FC = () => {
         <h2 className="text-2xl font-black text-slate-800 flex items-center gap-3">
           <SparklesIcon className="w-8 h-8 text-indigo-500" /> Truyện AI Thông Minh
         </h2>
-        <button onClick={handleCreateStory} disabled={isLoading} className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold">TẠO TRUYỆN MỚI</button>
+        <button onClick={() => setActiveTool(ToolType.DASHBOARD)} className="text-xs font-bold text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl">Quay lại Dashboard</button>
       </div>
       {stories.length > 0 ? (
         stories.map(story => (
@@ -240,7 +251,7 @@ const App: React.FC = () => {
         ))
       ) : (
         <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-100">
-          <p className="text-slate-400 font-bold">Bạn chưa có câu chuyện nào. Hãy chọn "Viết truyện AI" từ Dashboard!</p>
+          <p className="text-slate-400 font-bold">Bạn chưa có câu chuyện nào.</p>
         </div>
       )}
     </div>
@@ -250,7 +261,7 @@ const App: React.FC = () => {
     <div className="max-w-3xl mx-auto space-y-8 animate-in zoom-in-95 duration-500">
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-black text-slate-800">Kiểm tra từ vựng</h2>
-        <p className="text-slate-400">Dựa trên 10 từ vựng bạn vừa học</p>
+        <p className="text-slate-400">Dựa trên từ vựng bạn vừa học</p>
       </div>
       {currentQuiz.length > 0 ? (
         <div className="space-y-6">
@@ -278,7 +289,7 @@ const App: React.FC = () => {
       ) : (
         <div className="text-center py-20 bg-white rounded-[2rem] border border-slate-100">
            <AcademicCapIcon className="w-16 h-16 text-slate-200 mx-auto mb-4" />
-           <p className="text-slate-400 font-bold">Nhấn "Làm kiểm tra" tại Dashboard để bắt đầu!</p>
+           <p className="text-slate-400 font-bold">Bắt đầu bài kiểm tra ngay!</p>
         </div>
       )}
     </div>
@@ -302,14 +313,14 @@ const App: React.FC = () => {
              <div className={`px-4 py-2 rounded-full text-[10px] font-black tracking-widest border transition-all ${isConnected ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
                 {isConnected ? 'API SẴN SÀNG' : 'THIẾU API KEY'}
              </div>
-             <button onClick={handleConnectAPI} className="p-2 bg-white rounded-xl border border-slate-200 text-slate-400 hover:text-indigo-600"><BoltIcon className="w-5 h-5" /></button>
+             <button onClick={handleConnectAPI} title="Cấu hình API" className="p-2 bg-white rounded-xl border border-slate-200 text-slate-400 hover:text-indigo-600"><BoltIcon className="w-5 h-5" /></button>
           </div>
         </header>
 
         {activeTool === ToolType.DASHBOARD && renderDashboard()}
         {activeTool === ToolType.STORIES && renderStories()}
         {activeTool === ToolType.QUIZ && renderQuiz()}
-        {activeTool === ToolType.HISTORY && renderDashboard() /* Tạm thời map vào dashboard */}
+        {activeTool === ToolType.HISTORY && renderDashboard()}
 
         <footer className="mt-20 py-8 border-t border-slate-100 flex justify-between items-center text-[10px] font-black text-slate-300 tracking-widest uppercase">
           <p>&copy; 2024 TNP LANGUAGE PLATFORM</p>
