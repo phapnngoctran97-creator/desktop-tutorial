@@ -2,7 +2,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TranslationResponse, GeneratedStory, QuizQuestion, HistoryItem } from "../types";
 
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getAI = () => {
+  const key = process.env.API_KEY;
+  if (!key || key.trim() === "") {
+    throw new Error("API Key is not configured correctly.");
+  }
+  return new GoogleGenAI({ apiKey: key });
+};
 
 export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' = 'vi_en'): Promise<TranslationResponse> => {
   try {
@@ -41,7 +47,13 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
     return JSON.parse(response.text.trim());
   } catch (error: any) {
     console.error("Gemini Error:", error);
-    return { english: "Error", phonetic: "N/A", partOfSpeech: "Error", usageHint: "Check your API key.", emoji: "⚠️" };
+    return { 
+      english: "Error", 
+      phonetic: "N/A", 
+      partOfSpeech: "Error", 
+      usageHint: "Vui lòng kiểm tra API Key trong Cloudflare Dashboard.", 
+      emoji: "⚠️" 
+    };
   }
 };
 
