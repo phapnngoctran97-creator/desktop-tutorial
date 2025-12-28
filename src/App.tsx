@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { HistoryItem, TranslationResponse, ToolType, GeneratedStory, QuizQuestion } from './types';
 import { translateText, generateStoryFromWords, generateQuizFromHistory } from './services/geminiService';
 import { Mascot } from './components/Mascot';
@@ -7,7 +7,8 @@ import { Sidebar } from './components/Sidebar';
 import { 
   ClockIcon, SparklesIcon, ArrowsRightLeftIcon, 
   BoltIcon, BookOpenIcon, AcademicCapIcon,
-  CheckCircleIcon, XCircleIcon, ArrowPathIcon
+  CheckCircleIcon, XCircleIcon, ArrowPathIcon,
+  TrashIcon, SpeakerWaveIcon
 } from './components/Icons';
 
 const App: React.FC = () => {
@@ -19,16 +20,18 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [apiStatus, setApiStatus] = useState<'none' | 'system' | 'session'>('none');
-  
-  // State cho Truyện AI
   const [stories, setStories] = useState<GeneratedStory[]>([]);
-  
-  // State cho Quiz
   const [currentQuiz, setCurrentQuiz] = useState<QuizQuestion[]>([]);
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({});
   const [showQuizResults, setShowQuizResults] = useState(false);
 
+  // Load data from LocalStorage on mount
   useEffect(() => {
+    const savedHistory = localStorage.getItem('tnp_history');
+    const savedStories = localStorage.getItem('tnp_stories');
+    if (savedHistory) setHistory(JSON.parse(savedHistory));
+    if (savedStories) setStories(JSON.parse(savedStories));
+
     const checkKey = async () => {
       if (process.env.API_KEY && process.env.API_KEY.length > 10) {
         setApiStatus('system');
@@ -50,6 +53,27 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Save to LocalStorage whenever history or stories change
+  useEffect(() => {
+    localStorage.setItem('tnp_history', JSON.stringify(history));
+  }, [history]);
+
+  useEffect(() => {
+    localStorage.setItem('tnp_stories', JSON.stringify(stories));
+  }, [stories]);
+
+  const suggestions = useMemo(() => {
+    if (!inputText.trim()) return [];
+    const lastWord = inputText.split(/[,\n;]+/).pop()?.trim().toLowerCase() || '';
+    if (!lastWord) return [];
+    return history
+      .filter(item => 
+        item.english.toLowerCase().startsWith(lastWord) || 
+        item.vietnamese.toLowerCase().startsWith(lastWord)
+      )
+      .slice(0, 5);
+  }, [inputText, history]);
+
   const handleConnectAPI = async () => {
     // @ts-ignore
     if (window.aistudio?.openSelectKey) {
@@ -60,13 +84,14 @@ const App: React.FC = () => {
     }
   };
 
-  const handleTranslate = async () => {
-    if (!inputText.trim()) return;
+  const handleTranslate = async (overrideText?: string) => {
+    const textToTranslate = overrideText || inputText;
+    if (!textToTranslate.trim()) return;
     if (apiStatus === 'none') { await handleConnectAPI(); return; }
 
     setIsLoading(true);
     try {
-      const words = inputText.split(/[,\n;]+/).map(w => w.trim()).filter(w => w.length > 0);
+      const words = textToTranslate.split(/[,\n;]+/).map(w => w.trim()).filter(w => w.length > 0);
       const results = await Promise.all(words.slice(0, 5).map(async (word) => {
         const res = await translateText(word, direction);
         return { ...res, source: word };
@@ -75,18 +100,39 @@ const App: React.FC = () => {
       setTranslatedResults(results);
       const newItems: HistoryItem[] = results.map((res, idx) => ({
         id: `${Date.now()}-${idx}`,
-        vietnamese: direction === 'vi_en' ? res.source : res.english, // Đây là bản dịch tạm thời
+        vietnamese: direction === 'vi_en' ? res.source : res.english,
         english: direction === 'en_vi' ? res.source : res.english,
         partOfSpeech: res.partOfSpeech,
         usageHint: res.usageHint,
         timestamp: Date.now(),
         usedInStory: false
       }));
-      setHistory(prev => [...newItems, ...prev].slice(0, 50));
+      
+      // Filter out duplicates and update history
+      setHistory(prev => {
+        const combined = [...newItems, ...prev];
+        const unique = Array.from(new Map(combined.map(item => [item.english.toLowerCase(), item])).values());
+        return unique.slice(0, 100);
+      });
+      if (!overrideText) setInputText('');
     } catch (err) {
       console.error(err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const applySuggestion = (suggestedWord: string) => {
+    const parts = inputText.split(/[,\n;]+/);
+    parts.pop();
+    const newText = [...parts, suggestedWord].join(', ') + ', ';
+    setInputText(newText);
+  };
+
+  const clearHistory = () => {
+    if (confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử học tập?")) {
+      setHistory([]);
+      localStorage.removeItem('tnp_history');
     }
   };
 
@@ -143,15 +189,35 @@ const App: React.FC = () => {
               {direction === 'en_vi' ? 'ANH - VIỆT' : 'VIỆT - ANH'}
             </button>
           </div>
-          <textarea 
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            className="w-full h-32 p-6 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-indigo-500/20 text-lg resize-none placeholder-slate-300 transition-all"
-            placeholder="Ví dụ: apple, banana, car..."
-          />
+          
+          <div className="relative">
+            <textarea 
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              className="w-full h-32 p-6 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-indigo-500/20 text-lg resize-none placeholder-slate-300 transition-all"
+              placeholder="Ví dụ: apple, banana, car..."
+            />
+            
+            {suggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-100 rounded-2xl shadow-xl z-10 overflow-hidden animate-in slide-in-from-top-2">
+                <div className="p-3 bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">Từ bạn đã học</div>
+                {suggestions.map((item, i) => (
+                  <button 
+                    key={i}
+                    onClick={() => applySuggestion(item.english)}
+                    className="w-full p-4 text-left hover:bg-indigo-50 flex items-center justify-between transition-colors border-b border-slate-50 last:border-none"
+                  >
+                    <span className="font-bold text-slate-700">{item.english}</span>
+                    <span className="text-xs text-slate-400">{item.vietnamese}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button 
-            onClick={handleTranslate}
-            disabled={isLoading}
+            onClick={() => handleTranslate()}
+            disabled={isLoading || !inputText.trim()}
             className="w-full mt-4 bg-indigo-600 text-white py-4 rounded-xl font-black hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {isLoading ? <ArrowPathIcon className="w-5 h-5 animate-spin" /> : "DỊCH VÀ LƯU VÀO BỘ NHỚ"}
@@ -198,6 +264,58 @@ const App: React.FC = () => {
               <p className="text-slate-500 text-sm italic leading-relaxed">"{res.usageHint}"</p>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderHistory = () => (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-black text-slate-800 flex items-center gap-3">
+            <ClockIcon className="w-8 h-8 text-indigo-500" /> Nhật ký học tập
+          </h2>
+          <p className="text-slate-400 text-sm font-medium">Bạn đã học được {history.length} từ vựng</p>
+        </div>
+        <button 
+          onClick={clearHistory}
+          className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all"
+          title="Xóa toàn bộ lịch sử"
+        >
+          <TrashIcon className="w-5 h-5" />
+        </button>
+      </div>
+
+      {history.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {history.map((item) => (
+            <div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 transition-all group">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[10px] font-black text-slate-300 uppercase">{new Date(item.timestamp).toLocaleDateString()}</span>
+                <span className="text-[10px] font-black text-indigo-400 bg-indigo-50 px-2 py-0.5 rounded">{item.partOfSpeech}</span>
+              </div>
+              <h4 className="text-lg font-black text-slate-800">{item.english}</h4>
+              <p className="text-slate-500 text-sm font-medium">{item.vietnamese}</p>
+              <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
+                <button 
+                  onClick={() => setInputText(item.english)} 
+                  className="text-[10px] font-black text-indigo-600 hover:underline"
+                >
+                  DỊCH LẠI
+                </button>
+                <div className="flex gap-2">
+                   <SpeakerWaveIcon className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 cursor-pointer" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-32 bg-white rounded-[3rem] border border-slate-100 border-dashed">
+          <ClockIcon className="w-16 h-16 text-slate-100 mx-auto mb-4" />
+          <p className="text-slate-400 font-bold">Lịch sử của bạn đang trống.</p>
+          <button onClick={() => setActiveTool(ToolType.DASHBOARD)} className="mt-4 text-indigo-600 font-black text-xs">BẮT ĐẦU TRA CỨU NGAY</button>
         </div>
       )}
     </div>
@@ -403,12 +521,12 @@ const App: React.FC = () => {
         {activeTool === ToolType.DASHBOARD && renderDashboard()}
         {activeTool === ToolType.STORIES && renderStories()}
         {activeTool === ToolType.QUIZ && renderQuiz()}
-        {activeTool === ToolType.HISTORY && renderDashboard()}
+        {activeTool === ToolType.HISTORY && renderHistory()}
         
         <footer className="mt-20 py-8 border-t border-slate-100 flex justify-between items-center text-[10px] font-black text-slate-300 tracking-widest uppercase">
           <p>&copy; 2024 TNP LANGUAGE PLATFORM</p>
           <div className="flex gap-6">
-            <span>v1.2.0-stable</span>
+            <span>v1.2.5-persistent</span>
           </div>
         </footer>
       </main>
