@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoryItem, TranslationResponse, ToolType, GeneratedStory, QuizQuestion } from './types';
-import { translateText, generateStoryFromWords, generateQuizFromHistory } from './services/geminiService';
+import { translateText, generateStoryFromWords, generateQuizFromHistory, generateSpeech } from './services/geminiService';
 import { Mascot } from './components/Mascot';
 import { Sidebar } from './components/Sidebar';
 import { 
@@ -11,6 +11,36 @@ import {
   TrashIcon, SpeakerWaveIcon
 } from './components/Icons';
 
+// Helper functions for audio decoding
+function decodeBase64(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
+
 const App: React.FC = () => {
   const [activeTool, setActiveTool] = useState<ToolType>(ToolType.DASHBOARD);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -19,11 +49,14 @@ const App: React.FC = () => {
   const [direction, setDirection] = useState<'vi_en' | 'en_vi'>('en_vi');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [apiStatus, setApiStatus] = useState<'none' | 'system' | 'session'>('none');
   const [stories, setStories] = useState<GeneratedStory[]>([]);
   const [currentQuiz, setCurrentQuiz] = useState<QuizQuestion[]>([]);
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({});
   const [showQuizResults, setShowQuizResults] = useState(false);
+  
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // Load data from LocalStorage on mount
   useEffect(() => {
@@ -84,6 +117,36 @@ const App: React.FC = () => {
     }
   };
 
+  const playText = async (text: string) => {
+    if (isSpeaking) return;
+    setIsSpeaking(true);
+    try {
+      const base64Audio = await generateSpeech(text);
+      if (!base64Audio) throw new Error("Could not generate audio");
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      }
+      const ctx = audioContextRef.current;
+      
+      const audioBuffer = await decodeAudioData(
+        decodeBase64(base64Audio),
+        ctx,
+        24000,
+        1
+      );
+      
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+      source.onended = () => setIsSpeaking(false);
+      source.start();
+    } catch (err) {
+      console.error("Audio Playback Error:", err);
+      setIsSpeaking(false);
+    }
+  };
+
   const handleTranslate = async (overrideText?: string) => {
     const textToTranslate = overrideText || inputText;
     if (!textToTranslate.trim()) return;
@@ -108,7 +171,6 @@ const App: React.FC = () => {
         usedInStory: false
       }));
       
-      // Filter out duplicates and update history
       setHistory(prev => {
         const combined = [...newItems, ...prev];
         const unique = Array.from(new Map(combined.map(item => [item.english.toLowerCase(), item])).values());
@@ -170,6 +232,15 @@ const App: React.FC = () => {
       alert("Không thể tạo bài kiểm tra.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleMascotSpeak = () => {
+    if (history.length === 0) {
+      playText("Hello! You haven't added any words yet. Start searching to learn together!");
+    } else {
+      const randomWord = history[Math.floor(Math.random() * history.length)];
+      playText(`Let's review the word: ${randomWord.english}. It means ${randomWord.vietnamese}.`);
     }
   };
 
@@ -257,7 +328,16 @@ const App: React.FC = () => {
             <div key={i} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-md transition-all group">
                <div className="flex justify-between items-start mb-4">
                 <span className="text-4xl group-hover:scale-110 transition-transform block">{res.emoji}</span>
-                <span className="text-[10px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded">{res.partOfSpeech}</span>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => playText(res.english)}
+                    disabled={isSpeaking}
+                    className="p-2 bg-indigo-50 text-indigo-500 rounded-lg hover:bg-indigo-100 transition-colors"
+                  >
+                    <SpeakerWaveIcon className="w-4 h-4" />
+                  </button>
+                  <span className="text-[10px] font-black uppercase text-indigo-500 bg-indigo-50 px-2 py-1 rounded self-center">{res.partOfSpeech}</span>
+                </div>
               </div>
               <h4 className="text-xl font-black text-slate-800">{res.english}</h4>
               <p className="text-indigo-400 font-bold text-sm mb-4">{res.phonetic}</p>
@@ -305,7 +385,9 @@ const App: React.FC = () => {
                   DỊCH LẠI
                 </button>
                 <div className="flex gap-2">
-                   <SpeakerWaveIcon className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 cursor-pointer" />
+                   <button onClick={() => playText(item.english)} disabled={isSpeaking} className="p-1 hover:bg-indigo-50 rounded-md transition-colors">
+                     <SpeakerWaveIcon className={`w-4 h-4 ${isSpeaking ? 'text-slate-200' : 'text-slate-300 group-hover:text-indigo-400'}`} />
+                   </button>
                 </div>
               </div>
             </div>
@@ -346,7 +428,14 @@ const App: React.FC = () => {
               <div className="p-8 md:p-12">
                 <div className="flex items-center gap-4 mb-8">
                   <div className="px-4 py-1 bg-indigo-600 text-white text-[10px] font-black rounded-full uppercase tracking-tighter">{story.theme}</div>
-                  <div className="text-slate-300 text-xs font-medium">{new Date(story.timestamp).toLocaleDateString()}</div>
+                  <button 
+                    onClick={() => playText(story.content)}
+                    disabled={isSpeaking}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold hover:bg-indigo-100 transition-colors"
+                  >
+                    <SpeakerWaveIcon className="w-4 h-4" /> Listen to Story
+                  </button>
+                  <div className="text-slate-300 text-xs font-medium ml-auto">{new Date(story.timestamp).toLocaleDateString()}</div>
                 </div>
                 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
@@ -411,7 +500,12 @@ const App: React.FC = () => {
               <div className="flex items-start justify-between">
                 <div className="space-y-2">
                   <span className="text-indigo-500 font-black text-xs uppercase tracking-widest">Question 0{idx + 1}</span>
-                  <h4 className="text-xl font-bold text-slate-800 leading-tight">{q.question}</h4>
+                  <div className="flex items-center gap-3">
+                    <h4 className="text-xl font-bold text-slate-800 leading-tight">{q.question}</h4>
+                    <button onClick={() => playText(q.question)} className="p-1 hover:bg-slate-50 rounded-full transition-colors">
+                      <SpeakerWaveIcon className="w-4 h-4 text-indigo-300" />
+                    </button>
+                  </div>
                 </div>
                 {showQuizResults && (
                    <div className="shrink-0">
@@ -526,11 +620,15 @@ const App: React.FC = () => {
         <footer className="mt-20 py-8 border-t border-slate-100 flex justify-between items-center text-[10px] font-black text-slate-300 tracking-widest uppercase">
           <p>&copy; 2024 TNP LANGUAGE PLATFORM</p>
           <div className="flex gap-6">
-            <span>v1.2.5-persistent</span>
+            <span>v1.3.0-audio-enabled</span>
           </div>
         </footer>
       </main>
-      <Mascot latestWord={translatedResults[0]?.english} isSpeaking={false} onSpeak={() => {}} />
+      <Mascot 
+        latestWord={translatedResults[0]?.english} 
+        isSpeaking={isSpeaking} 
+        onSpeak={handleMascotSpeak} 
+      />
     </div>
   );
 };

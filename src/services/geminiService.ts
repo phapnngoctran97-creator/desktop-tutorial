@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { TranslationResponse, GeneratedStory, QuizQuestion, HistoryItem } from "../types";
 
 const getAI = () => {
@@ -123,4 +123,27 @@ export const generateQuizFromHistory = async (history: HistoryItem[]): Promise<Q
   });
 
   return JSON.parse(response.text.trim());
+};
+
+export const generateSpeech = async (text: string): Promise<string | undefined> => {
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: `Read this naturally: ${text}` }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
+          },
+        },
+      },
+    });
+
+    return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  } catch (error) {
+    console.error("TTS Error:", error);
+    return undefined;
+  }
 };
