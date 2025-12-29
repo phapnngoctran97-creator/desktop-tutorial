@@ -55,6 +55,7 @@ const App: React.FC = () => {
   const [currentQuiz, setCurrentQuiz] = useState<QuizQuestion[]>([]);
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({});
   const [showQuizResults, setShowQuizResults] = useState(false);
+  const [filterDate, setFilterDate] = useState<string>('');
   
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -106,6 +107,14 @@ const App: React.FC = () => {
       )
       .slice(0, 5);
   }, [inputText, history]);
+
+  const filteredHistory = useMemo(() => {
+    if (!filterDate) return history;
+    return history.filter(item => {
+      const itemDate = new Date(item.timestamp).toISOString().split('T')[0];
+      return itemDate === filterDate;
+    });
+  }, [history, filterDate]);
 
   const handleConnectAPI = async () => {
     // @ts-ignore
@@ -163,8 +172,10 @@ const App: React.FC = () => {
       setTranslatedResults(results);
       const newItems: HistoryItem[] = results.map((res, idx) => ({
         id: `${Date.now()}-${idx}`,
-        vietnamese: direction === 'vi_en' ? res.source : res.english,
-        english: direction === 'en_vi' ? res.source : res.english,
+        vietnamese: direction === 'en_vi' ? res.translation : res.source,
+        english: direction === 'vi_en' ? res.translation : res.source,
+        phonetic: res.phonetic,
+        emoji: res.emoji,
         partOfSpeech: res.partOfSpeech,
         usageHint: res.usageHint,
         timestamp: Date.now(),
@@ -174,7 +185,7 @@ const App: React.FC = () => {
       setHistory(prev => {
         const combined = [...newItems, ...prev];
         const unique = Array.from(new Map(combined.map(item => [item.english.toLowerCase(), item])).values());
-        return unique.slice(0, 100);
+        return unique.slice(0, 200);
       });
       if (!overrideText) setInputText('');
     } catch (err) {
@@ -199,13 +210,13 @@ const App: React.FC = () => {
   };
 
   const handleCreateStory = async () => {
-    if (history.length < 3) {
-      alert("Bạn cần dịch ít nhất 3 từ để AI có đủ dữ liệu tạo truyện!");
+    if (history.length < 5) {
+      alert("Bạn cần dịch ít nhất 5 từ để AI có đủ dữ liệu tạo truyện!");
       return;
     }
     setIsLoading(true);
     try {
-      const wordsToUse = history.slice(0, 6).map(h => h.english);
+      const wordsToUse = history.slice(0, 8).map(h => h.english);
       const story = await generateStoryFromWords(wordsToUse);
       setStories(prev => [story, ...prev]);
       setActiveTool(ToolType.STORIES);
@@ -302,7 +313,7 @@ const App: React.FC = () => {
             disabled={isLoading}
             className="w-full p-4 bg-indigo-50 text-indigo-700 rounded-2xl font-bold hover:bg-indigo-100 transition-all flex items-center justify-between group"
           >
-            <span>Viết truyện từ vựng</span>
+            <span>Viết truyện từ vựng (≥5 từ)</span>
             <SparklesIcon className="w-5 h-5 group-hover:rotate-12 transition-transform" />
           </button>
           <button 
@@ -340,7 +351,8 @@ const App: React.FC = () => {
                 </div>
               </div>
               <h4 className="text-xl font-black text-slate-800">{res.english}</h4>
-              <p className="text-indigo-400 font-bold text-sm mb-4">{res.phonetic}</p>
+              <p className="text-indigo-400 font-bold text-sm mb-1">{res.phonetic}</p>
+              <p className="text-emerald-600 font-bold text-lg mb-4">{res.translation}</p>
               <p className="text-slate-500 text-sm italic leading-relaxed">"{res.usageHint}"</p>
             </div>
           ))}
@@ -351,41 +363,63 @@ const App: React.FC = () => {
 
   const renderHistory = () => (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-800 flex items-center gap-3">
             <ClockIcon className="w-8 h-8 text-indigo-500" /> Nhật ký học tập
           </h2>
           <p className="text-slate-400 text-sm font-medium">Bạn đã học được {history.length} từ vựng</p>
         </div>
-        <button 
-          onClick={clearHistory}
-          className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all"
-          title="Xóa toàn bộ lịch sử"
-        >
-          <TrashIcon className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-4 w-full md:w-auto">
+          <div className="relative flex-1 md:flex-none">
+            <input 
+              type="date" 
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+              className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-bold text-slate-600 focus:ring-2 focus:ring-indigo-500/20 outline-none w-full"
+            />
+            {filterDate && (
+              <button onClick={() => setFilterDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-red-500">
+                <XCircleIcon className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button 
+            onClick={clearHistory}
+            className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition-all"
+            title="Xóa toàn bộ lịch sử"
+          >
+            <TrashIcon className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
-      {history.length > 0 ? (
+      {filteredHistory.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {history.map((item) => (
-            <div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 transition-all group">
+          {filteredHistory.map((item) => (
+            <div key={item.id} className="bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm hover:border-indigo-200 transition-all group flex flex-col">
               <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-black text-slate-300 uppercase">{new Date(item.timestamp).toLocaleDateString()}</span>
+                <span className="text-[10px] font-black text-slate-300 uppercase">{new Date(item.timestamp).toLocaleDateString('vi-VN')}</span>
                 <span className="text-[10px] font-black text-indigo-400 bg-indigo-50 px-2 py-0.5 rounded">{item.partOfSpeech}</span>
               </div>
-              <h4 className="text-lg font-black text-slate-800">{item.english}</h4>
-              <p className="text-slate-500 text-sm font-medium">{item.vietnamese}</p>
-              <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
+              <div className="flex items-center justify-between">
+                <h4 className="text-lg font-black text-slate-800">{item.english}</h4>
+                <span className="text-2xl">{item.emoji}</span>
+              </div>
+              <p className="text-indigo-400 text-xs font-bold mb-1">{item.phonetic}</p>
+              <p className="text-emerald-600 text-sm font-black mb-4">{item.vietnamese}</p>
+              <div className="mt-auto pt-4 border-t border-slate-50 flex justify-between items-center">
                 <button 
-                  onClick={() => setInputText(item.english)} 
+                  onClick={() => {
+                    setActiveTool(ToolType.DASHBOARD);
+                    setInputText(item.english);
+                  }} 
                   className="text-[10px] font-black text-indigo-600 hover:underline"
                 >
                   DỊCH LẠI
                 </button>
                 <div className="flex gap-2">
-                   <button onClick={() => playText(item.english)} disabled={isSpeaking} className="p-1 hover:bg-indigo-50 rounded-md transition-colors">
+                   <button onClick={() => playText(item.english)} disabled={isSpeaking} className="p-1.5 hover:bg-indigo-50 rounded-md transition-colors">
                      <SpeakerWaveIcon className={`w-4 h-4 ${isSpeaking ? 'text-slate-200' : 'text-slate-300 group-hover:text-indigo-400'}`} />
                    </button>
                 </div>
@@ -396,8 +430,8 @@ const App: React.FC = () => {
       ) : (
         <div className="text-center py-32 bg-white rounded-[3rem] border border-slate-100 border-dashed">
           <ClockIcon className="w-16 h-16 text-slate-100 mx-auto mb-4" />
-          <p className="text-slate-400 font-bold">Lịch sử của bạn đang trống.</p>
-          <button onClick={() => setActiveTool(ToolType.DASHBOARD)} className="mt-4 text-indigo-600 font-black text-xs">BẮT ĐẦU TRA CỨU NGAY</button>
+          <p className="text-slate-400 font-bold">{filterDate ? `Không tìm thấy từ nào trong ngày ${filterDate}` : "Lịch sử của bạn đang trống."}</p>
+          <button onClick={() => { setActiveTool(ToolType.DASHBOARD); setFilterDate(''); }} className="mt-4 text-indigo-600 font-black text-xs">BẮT ĐẦU TRA CỨU NGAY</button>
         </div>
       )}
     </div>
@@ -472,7 +506,7 @@ const App: React.FC = () => {
         </div>
       ) : !isLoading && (
         <div className="text-center py-20 bg-white rounded-[2rem] border border-slate-100">
-          <p className="text-slate-400 font-bold">Hãy tra cứu từ vựng và nhấn "Viết truyện" để bắt đầu!</p>
+          <p className="text-slate-400 font-bold">Hãy tra cứu ít nhất 5 từ vựng và nhấn "Viết truyện" để bắt đầu!</p>
         </div>
       )}
     </div>
@@ -620,7 +654,7 @@ const App: React.FC = () => {
         <footer className="mt-20 py-8 border-t border-slate-100 flex justify-between items-center text-[10px] font-black text-slate-300 tracking-widest uppercase">
           <p>&copy; 2024 TNP LANGUAGE PLATFORM</p>
           <div className="flex gap-6">
-            <span>v1.3.0-audio-enabled</span>
+            <span>v1.3.5-persistent-filters</span>
           </div>
         </footer>
       </main>

@@ -18,11 +18,12 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
     const prompt = `
       Task: Translate "${text}" ${isEnToVi ? 'from English to Vietnamese' : 'from Vietnamese to English'}.
       Rules: Return valid JSON with:
-      1. "english": Correct English spelling.
-      2. "phonetic": Accuracy IPA.
-      3. "partOfSpeech": (n/v/adj/adv).
-      4. "usageHint": Short example sentence.
-      5. "emoji": One related emoji.
+      1. "english": The English version of the word.
+      2. "translation": The translated version (Vietnamese if input was English, and vice versa).
+      3. "phonetic": Accuracy IPA for the English word.
+      4. "partOfSpeech": (n/v/adj/adv).
+      5. "usageHint": Short example sentence in the target language.
+      6. "emoji": One related emoji.
     `;
 
     const response = await ai.models.generateContent({
@@ -34,12 +35,13 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
           type: Type.OBJECT,
           properties: {
             english: { type: Type.STRING },
+            translation: { type: Type.STRING },
             phonetic: { type: Type.STRING },
             partOfSpeech: { type: Type.STRING },
             usageHint: { type: Type.STRING },
             emoji: { type: Type.STRING }
           },
-          required: ["english", "phonetic", "partOfSpeech", "usageHint", "emoji"]
+          required: ["english", "translation", "phonetic", "partOfSpeech", "usageHint", "emoji"]
         }
       }
     });
@@ -49,6 +51,7 @@ export const translateText = async (text: string, direction: 'vi_en' | 'en_vi' =
     console.error("Gemini Error:", error);
     return { 
       english: "Error", 
+      translation: "Lỗi",
       phonetic: "/err/", 
       partOfSpeech: "error", 
       usageHint: "Vui lòng kiểm tra lại API Key.", 

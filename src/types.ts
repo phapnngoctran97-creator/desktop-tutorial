@@ -12,8 +12,10 @@ export interface HistoryItem {
   id: string;
   vietnamese: string;
   english: string;
+  phonetic?: string;
   partOfSpeech?: string;
   usageHint?: string;
+  emoji?: string;
   timestamp: number;
   usedInStory: boolean;
 }
@@ -53,6 +55,7 @@ export interface WordDefinition {
 
 export interface TranslationResponse {
   english: string;
+  translation: string;
   phonetic: string;
   partOfSpeech: string;
   usageHint: string;
